@@ -52,6 +52,9 @@ class Tools extends CI_Controller
         $result .= "php index.php tools migrate [\"version_number\"]    Run all migrations. The version number is optional.\n";
         $result .= "php index.php tools seeder \"file_name\"            Creates a new seed file.\n";
         $result .= "php index.php tools seed \"file_name\"              Run the specified seed file.\n";
+        $result .= "php index.php tools tenant_mestre                  Multi-tenancy: migrate the master database.\n";
+        $result .= "php index.php tools tenant_criar \"dominio\" \"nome\"  Multi-tenancy: provision a tenant.\n";
+        $result .= "php index.php tools tenants_migrate                Multi-tenancy: migrate every tenant schema.\n";
 
         echo $result . PHP_EOL;
     }
@@ -79,6 +82,63 @@ class Tools extends CI_Controller
             show_error($this->migration->error_string());
         } else {
             echo 'Migrations run successfully' . PHP_EOL;
+        }
+    }
+
+    /**
+     * Multi-tenancy: cria/atualiza as tabelas do banco mestre (tenants,
+     * tenant_usage) em DB_MASTER_DATABASE. Ver docs/multi-tenancy.md.
+     */
+    public function tenant_mestre()
+    {
+        $this->executarTenant(function (Tenant_manager $tenants) {
+            $tenants->migrarMestre();
+            echo 'Banco mestre atualizado.' . PHP_EOL;
+        });
+    }
+
+    /**
+     * Multi-tenancy: provisiona um tenant (schema + migrations + registro).
+     */
+    public function tenant_criar($dominio = null, $nome = null)
+    {
+        if (! $dominio || ! $nome) {
+            echo 'Uso: php index.php tools tenant_criar "dominio" "nome"' . PHP_EOL;
+
+            return;
+        }
+
+        $this->executarTenant(function (Tenant_manager $tenants) use ($dominio, $nome) {
+            $id = $tenants->provisionar(['dominio' => $dominio, 'nome' => urldecode($nome)]);
+            $tenant = $tenants->buscarPorDominio($dominio);
+            echo "Tenant {$id} criado: {$tenant['dominio']} -> {$tenant['schema']}" . PHP_EOL;
+        });
+    }
+
+    /**
+     * Multi-tenancy: leva todos os schemas de tenant à última migration (rodar
+     * depois de cada deploy, junto com tenant_mestre).
+     */
+    public function tenants_migrate()
+    {
+        $this->executarTenant(function (Tenant_manager $tenants) {
+            foreach ($tenants->listar() as $tenant) {
+                $tenants->migrarSchema($tenant['schema']);
+                echo "{$tenant['dominio']} ({$tenant['schema']}): ok" . PHP_EOL;
+            }
+        });
+    }
+
+    private function executarTenant(callable $acao)
+    {
+        $this->load->library('Tenant_manager');
+
+        try {
+            $acao($this->tenant_manager);
+        } catch (Throwable $erro) {
+            log_message('error', 'tools tenant: ' . $erro->getMessage());
+            echo 'Erro: ' . $erro->getMessage() . PHP_EOL;
+            exit(1);
         }
     }
 

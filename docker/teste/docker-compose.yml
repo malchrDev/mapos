@@ -1,0 +1,49 @@
+# Ambiente de testes de integração (multi-tenancy contra MySQL real).
+#
+# Uso (a partir da raiz do projeto):
+#   docker compose -f docker/teste/docker-compose.yml up -d --build --wait mysql
+#   docker compose -f docker/teste/docker-compose.yml run --rm php
+#   docker compose -f docker/teste/docker-compose.yml down -v
+#
+# O MySQL roda em tmpfs: cada `up` começa de banco vazio. Nada aqui é para
+# produção — senhas fixas e porta só em 127.0.0.1.
+name: mapos-teste
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root_teste
+      MYSQL_DATABASE: mapos_master
+      MYSQL_USER: mapos
+      MYSQL_PASSWORD: mapos_teste
+    volumes:
+      - "./mysql-init.sql:/docker-entrypoint-initdb.d/01-mapos.sql:ro"
+    tmpfs:
+      - /var/lib/mysql
+    ports:
+      - "127.0.0.1:33306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-umapos", "-pmapos_teste"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - "../../:/app"
+    environment:
+      DB_HOSTNAME: mysql
+      DB_PORT: "3306"
+      DB_USERNAME: mapos
+      DB_PASSWORD: mapos_teste
+      DB_DATABASE: mapos_padrao
+      DB_MASTER_DATABASE: mapos_master
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["php", "application/vendor/bin/phpunit", "-c", "phpunit.integracao.xml"]

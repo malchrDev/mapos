@@ -153,6 +153,27 @@ function &re_get_instance()
 {
 }
 
+// CI_Migration: o Tenant_manager instancia direto, com a pasta de migrations
+// do mestre ou do tenant. Só a API pública que o Map-OS usa.
+class CI_Migration
+{
+    public function __construct($config = [])
+    {
+    }
+
+    /** @return bool|string */
+    public function latest()
+    {
+        return true;
+    }
+
+    /** @return string */
+    public function error_string()
+    {
+        return '';
+    }
+}
+
 // CI_Model recebe as mesmas bibliotecas injetadas na instância que o
 // controller. Sem esta classe, todo model reporta $db e $input inexistentes.
 //

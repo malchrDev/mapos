@@ -3,7 +3,7 @@
 /**
  * Registro de tenants da plataforma SaaS (Fase 1 — multi-tenancy).
  *
- * Esta tabela vive no banco MESTRE (DB_DATABASE), não no schema de tenant: é
+ * Esta tabela vive no banco MESTRE (DB_MASTER_DATABASE), não no schema de tenant: é
  * o que permite resolver, a partir do hostname da requisição, em qual schema
  * os dados daquela empresa vivem.
  *

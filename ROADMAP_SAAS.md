@@ -66,12 +66,21 @@ SLA (`os`: `prioridade`, `severidade`, `sla_nivel_id`, `data_limite_resposta`,
 `data_limite_resolucao`, `sla_breach`) é Fase 2, junto com as tabelas SLA, e não
 entra aqui.
 
+## Decisões tomadas
+
+1. Fork: https://github.com/malchrDev/mapos (remote `fork`).
+2. Schema per tenant.
+3. Fase 1 só multi-tenancy; SLA na Fase 2.
+4. Tenant acessa por subdomínio da plataforma e por domínio próprio.
+5. Painel administrativo da plataforma em subdomínio separado.
+6. Acesso do admin do tenant enviado ao e-mail do pedido de inscrição, após
+   confirmação do pagamento ou imediatamente no plano CORTESIA.
+
 ## Decisões pendentes do usuário
 
-1. URL do fork no GitHub (para conectar o repositório e abrir branches/PRs).
-2. Banco compartilhado com `tenant_id` vs. schema per tenant (recomendado: schema per tenant).
-3. Escopo da Fase 1: só multi-tenancy, ou já incluir SLA?
-4. Processo ITIL e controle ISO prioritários para o primeiro cliente.
+1. Processo ITIL e controle ISO prioritários para o primeiro cliente (sugestão
+   em avaliação: Incidente/Requisição + SLA primeiro; auditoria imutável, backup
+   por tenant e LGPD primeiro na ISO 27001).
 
 ## Critérios de aceitação da Fase 1
 

@@ -38,26 +38,71 @@ DB_DATABASE=mapos_padrao
 DB_MASTER_DATABASE=mapos_master
 ```
 
+### Usuário do MySQL
+
+O usuário da aplicação precisa criar e dropar os schemas dos tenants. Basta o
+prefixo, nada além:
+
+```sql
+GRANT ALL PRIVILEGES ON `mapos\_%`.* TO 'mapos'@'%';
+```
+
+## Comandos (CLI)
+
+```bash
+php index.php tools tenant_mestre                    # cria/atualiza tenants e tenant_usage no mestre
+php index.php tools tenant_criar loja.exemplo.com "Loja%20Exemplo"
+php index.php tools tenants_migrate                  # leva todos os tenants à última migration
+```
+
+Depois de cada deploy: `tenant_mestre` e `tenants_migrate`. Enquanto o painel
+administrativo (subdomínio próprio) não existe, o provisionamento é por aqui.
+
 ## Provisionamento
 
 `Tenant_manager::provisionar()` (application/libraries/Tenant_manager.php), nesta
 ordem:
 
-1. **`criarSchema()`** — `CREATE DATABASE mapos_<dominio>`.
-2. **`rodarMigrationsNoSchema()`** — copia as migrations de negócio para um
-   diretório de staging (sem as duas do banco mestre) e roda `migration->latest()`
-   com a conexão apontada para o schema novo. Ao final, volta a conexão ao mestre.
-3. **INSERT em `tenants`** — só depois das tabelas existirem.
+1. Recusa domínio inválido e domínio já registrado **em qualquer status**
+   (suspenso e cancelado continuam reservados).
+2. **`gerarNomeSchema()`** — `mapos_<dominio sem pontuação>_<6 hex aleatórios>`.
+   O sufixo impede que `a-b.com` e `ab.com` caiam no mesmo schema.
+3. **`criarSchema()`** — `CREATE DATABASE`. Schema que já existe é **erro**, nunca
+   reaproveitado: reaproveitar entregaria a um tenant os dados de outro.
+4. **`migrarSchema()`** — roda as migrations de negócio numa conexão própria do
+   schema novo. `$CI->db`/`$CI->dbforge` são trocados durante a execução e
+   devolvidos no fim.
+5. **INSERT em `tenants`** no mestre — só depois das tabelas existirem.
 
-A ordem é do mais barato de desfazer para o mais caro. Se as migrations falharem,
-o schema é dropado: sem registro em `tenants` nenhuma requisição o resolve, então
-ele não vaza acesso — só ocupa espaço no cluster.
+A ordem é do mais barato de desfazer para o mais caro. Se as migrations ou o
+INSERT falharem, o schema é dropado: sem registro em `tenants` nenhuma
+requisição o resolve, então ele não vaza acesso.
 
-### O que não roda no schema do tenant
+O `Tenant_manager` abre as próprias conexões (uma com o mestre, uma por schema),
+com as credenciais da conexão da aplicação e `db_debug` desligado — os erros
+viram exceção, para que o provisionamento consiga desfazer o que já fez.
 
-`20261106000000_create_tenants.php` e `20261106000100_create_tenant_usage.php`:
-criam tabelas do banco mestre. Rodá-las dentro de um tenant criaria uma tabela
-`tenants` em cada tenant.
+### Migrations do mestre ficam em outra pasta
+
+`application/database/migrations_mestre/` (`create_tenants`, `create_tenant_usage`)
+só roda no `DB_MASTER_DATABASE`. `application/database/migrations/` são as de
+negócio: rodam em cada tenant e na instalação única. Separadas, nenhuma
+migration do mestre entra num tenant, e a verificação de "banco desatualizado"
+do painel (que compara a pasta com a versão do banco) continua correta em cada
+tenant.
+
+## Testes de integração (MySQL real)
+
+```bash
+docker compose -f docker/teste/docker-compose.yml up -d --build --wait mysql
+docker compose -f docker/teste/docker-compose.yml run --rm php
+docker compose -f docker/teste/docker-compose.yml down -v
+```
+
+`tests/Integration/TenantIsolamentoTest.php` provisiona tenants de verdade e
+confere que cada Host só enxerga o próprio schema, que domínio repetido e schema
+existente são recusados, que tenant suspenso não resolve e que o banco padrão
+não é tocado. Fora do container (sem `DB_MASTER_DATABASE`) os testes são pulados.
 
 ## Resolução e status
 
@@ -70,7 +115,8 @@ consulta ao mestre usa statement parametrizado (PDO).
 
 ## Banco mestre fora do ar
 
-O hook engole a exceção e segue com o `DB_DATABASE` configurado. Uma falha do
+O hook registra a falha no log do PHP (`error_log`) e segue com o `DB_DATABASE`
+configurado. Uma falha do
 banco mestre não pode derrubar a aplicação inteira antes de o framework nascer; o
 erro aparece na tela normal de falha de banco.
 
@@ -97,6 +143,6 @@ existem; nada ainda os consulta.
 
 ## Instalação única continua igual
 
-Sem `DB_MASTER_DATABASE`, sem staging, sem schema por cliente: o hook não faz nada
+Sem `DB_MASTER_DATABASE`, sem banco mestre, sem schema por cliente: o hook não faz nada
 e o banco é o `DB_DATABASE` de sempre. Nenhuma instalação existente do Map-OS
 precisa mudar.

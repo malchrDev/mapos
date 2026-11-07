@@ -9,7 +9,7 @@ if (! defined('BASEPATH')) {
  *
  * Roda em pre_system, antes de o framework abrir o banco: aqui ainda não existe
  * loader do CodeIgniter, então a consulta ao banco mestre é uma só, direta, com
- * PDO (extensão já exigida pelo driver mysqli) e statement parametrizado.
+ * PDO e statement parametrizado.
  *
  * O schema resolvido é gravado em $_ENV['DB_DATABASE'] — que é exatamente o que
  * config/database.php lê para montar a conexão 'default'. Assim nenhum modelo
@@ -25,21 +25,44 @@ function resolverTenant()
     }
 
     // O hook roda uma vez por requisição (pre_system), mas se for chamado de
-    // novo o schema do tenant já estaria no $_ENV e a consulta ao mestre
-    // consultaria o banco errado.
+    // novo o schema do tenant já estaria no $_ENV.
     if (isset($GLOBALS['mapos_tenant_resolvido'])) {
         return;
     }
     $GLOBALS['mapos_tenant_resolvido'] = true;
 
-    $dominio = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $schema = tenantSchemaDoHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+
+    if ($schema !== null) {
+        $_ENV['DB_DATABASE'] = $schema;
+        $_SERVER['DB_DATABASE'] = $schema;
+        putenv('DB_DATABASE=' . $schema);
+    }
+}
+
+/**
+ * Schema do tenant ativo para o cabeçalho Host informado, ou null.
+ *
+ * Separada de resolverTenant() para poder ser exercitada fora de uma
+ * requisição web (testes de integração).
+ */
+function tenantSchemaDoHost(string $host): ?string
+{
+    // DB_MASTER_DATABASE vazio ou ausente desliga a multi-tenancy. Sem
+    // fallback para DB_DATABASE: numa instalação única isso abriria uma
+    // conexão a mais por requisição, só para falhar ao procurar `tenants`.
+    if (trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? '')) === '') {
+        return null;
+    }
+
+    $dominio = strtolower($host);
     $dominio = preg_replace('/:\d+$/', '', $dominio); // remove a porta, se vier com ela
 
     // Host é cabeçalho do cliente. Só hostname válido é consultado: o valor vai
     // para um statement parametrizado, mas restringir aqui evita consulta
     // inútil no banco mestre com hostname fora do padrão.
     if ($dominio === '' || filter_var($dominio, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-        return;
+        return null;
     }
 
     try {
@@ -47,15 +70,14 @@ function resolverTenant()
     } catch (Throwable $e) {
         // Banco mestre fora do ar não pode derrubar a aplicação inteira antes
         // mesmo do framework: segue com o schema configurado e deixa o erro
-        // aparecer na tela normal de falha de banco.
-        return;
+        // aparecer na tela normal de falha de banco. Fica registrado no log do
+        // PHP — sem isso, um erro de SQL aqui seria invisível.
+        error_log('mapos tenant: falha ao consultar o banco mestre: ' . $e->getMessage());
+
+        return null;
     }
 
-    if ($tenant !== null) {
-        $_ENV['DB_DATABASE'] = $tenant['schema'];
-        $_SERVER['DB_DATABASE'] = $tenant['schema'];
-        putenv('DB_DATABASE=' . $tenant['schema']);
-    }
+    return $tenant['schema'] ?? null;
 }
 
 /**
@@ -68,15 +90,15 @@ function resolverTenant()
  */
 function tenantConsultarPorDominio(string $dominio): ?array
 {
-    $host = $_ENV['DB_HOSTNAME'] ?? 'localhost';
-    $usuario = $_ENV['DB_USERNAME'] ?? '';
-    $senha = $_ENV['DB_PASSWORD'] ?? '';
-    $bancoMestre = $_ENV['DB_MASTER_DATABASE'] ?? ($_ENV['DB_DATABASE'] ?? '');
-    $porta = (int) ($_ENV['DB_PORT'] ?? 3306);
-
+    $bancoMestre = trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? ''));
     if ($bancoMestre === '') {
         return null;
     }
+
+    $host = $_ENV['DB_HOSTNAME'] ?? 'localhost';
+    $usuario = $_ENV['DB_USERNAME'] ?? '';
+    $senha = $_ENV['DB_PASSWORD'] ?? '';
+    $porta = (int) ($_ENV['DB_PORT'] ?? 3306);
 
     $dsn = 'mysql:host=' . $host . ';port=' . $porta . ';dbname=' . $bancoMestre . ';charset=utf8mb4';
     $pdo = new PDO($dsn, $usuario, $senha, [
@@ -84,7 +106,8 @@ function tenantConsultarPorDominio(string $dominio): ?array
         PDO::ATTR_TIMEOUT => 3,
     ]);
 
-    $stmt = $pdo->prepare('SELECT id, dominio, nome, schema, status FROM tenants WHERE dominio = ? AND status = ? LIMIT 1');
+    // `schema` é palavra reservada do MySQL: sem crase, a consulta não compila.
+    $stmt = $pdo->prepare('SELECT `id`, `dominio`, `nome`, `schema`, `status` FROM `tenants` WHERE `dominio` = ? AND `status` = ? LIMIT 1');
     $stmt->execute([$dominio, 'ativo']);
     $linha = $stmt->fetch(PDO::FETCH_ASSOC);
 

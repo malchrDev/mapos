@@ -9,6 +9,22 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Fixed (2026-11-07 — testado contra MySQL real)
+- `application/hooks/tenant.php`: coluna `schema` (palavra reservada) entre crases — a consulta falhava em silêncio e todo tenant caía no banco padrão.
+- `application/hooks/tenant.php`: `DB_MASTER_DATABASE` ausente não cai mais para `DB_DATABASE`; falha ao consultar o mestre vai para o `error_log`.
+- `Tenant_manager`: migrations do tenant rodam de fato no schema novo (antes rodavam no banco padrão e rebaixavam a versão dele).
+- `Tenant_manager`: todo acesso a `tenants` usa o banco mestre (antes o registro era gravado no `DB_DATABASE`).
+- `Tenant_manager`: nome de schema com sufixo aleatório e `criarSchema()` recusa schema existente — dois domínios não compartilham mais o mesmo schema.
+- `Tenant_manager`: domínio já registrado é recusado em qualquer status; conexões próprias com `db_debug` desligado, para o rollback do provisionamento funcionar.
+
+### Changed (2026-11-07)
+- Migrations do banco mestre movidas para `application/database/migrations_mestre/` (antes deixavam todo tenant com o banco "desatualizado").
+
+### Added (2026-11-07)
+- CLI: `tools tenant_mestre`, `tools tenant_criar`, `tools tenants_migrate`.
+- `docker/teste/`: MySQL 8.4 + PHP 8.5 para testes de integração.
+- `tests/Integration/TenantIsolamentoTest.php` (10 testes) e `phpunit.integracao.xml`.
+
 ### Added
 - Documento de planejamento: `ROADMAP_SAAS.md` — mapa de desenvolvimento SaaS por fases (multi-tenancy, SLA, ITIL, ISO 27001/LGPD, billing, operação).
 - `docs/multi-tenancy.md` — documentação completa da arquitetura schema-per-tenant (provisionamento, resolução, limites, exclusão LGPD).
