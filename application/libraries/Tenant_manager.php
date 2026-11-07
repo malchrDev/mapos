@@ -259,13 +259,17 @@ class Tenant_manager
     public function listarParaPainel(string $busca = '', ?string $status = null): array
     {
         $mestre = $this->mestre();
-        $mestre->select('t.id, t.nome, t.documento, t.status, t.criado_em, t.data_expiracao,'
+        $comPlano = $mestre->table_exists('planos');
+        $mestre->select('t.id, t.nome, t.documento, t.`schema`, t.status, t.criado_em, t.data_expiracao,'
             . " MAX(CASE WHEN d.tipo = 'plataforma' THEN d.dominio END) AS dominio,"
+            . ($comPlano ? ' MAX(p.nome) AS plano,' : ' NULL AS plano,')
             . ' COUNT(d.id) AS total_dominios', false)
             ->from('tenants t')
-            ->join('tenant_dominios d', 'd.tenant_id = t.id', 'left')
-            ->group_by('t.id')
-            ->order_by('t.id', 'DESC');
+            ->join('tenant_dominios d', 'd.tenant_id = t.id', 'left');
+        if ($comPlano) {
+            $mestre->join('planos p', 'p.id = t.plano_id', 'left');
+        }
+        $mestre->group_by('t.id')->order_by('t.id', 'DESC');
 
         if ($status !== null && in_array($status, self::STATUS, true)) {
             $mestre->where('t.status', $status);
@@ -306,7 +310,11 @@ class Tenant_manager
             throw new RuntimeException("Tenant {$id} não existe.");
         }
 
-        $this->mestre()->where('id', $id)->update('tenants', ['status' => $status, 'atualizado_em' => date('Y-m-d H:i:s')]);
+        $dados = ['status' => $status, 'atualizado_em' => date('Y-m-d H:i:s')];
+        if ($this->mestre()->field_exists('cancelado_em', 'tenants')) {
+            $dados['cancelado_em'] = $status === 'cancelado' ? date('Y-m-d H:i:s') : null;
+        }
+        $this->mestre()->where('id', $id)->update('tenants', $dados);
     }
 
     /**
@@ -505,7 +513,7 @@ class Tenant_manager
      * só existe no retorno — o chamador a entrega (e-mail de boas-vindas na
      * Fase 5; na tela do CLI enquanto isso).
      *
-     * @param  array{nome:string, dominio:string, admin_email:string, admin_nome?:string, documento?:string, limites?:array, data_expiracao?:string}  $dados
+     * @param  array{nome:string, dominio:string, admin_email:string, admin_nome?:string, documento?:string, limites?:array, data_expiracao?:string, plano_id?:int|null}  $dados
      * @return array{id:int, schema:string, admin_email:string, admin_senha:string}
      */
     public function provisionar(array $dados): array
@@ -555,7 +563,7 @@ class Tenant_manager
                 'limites' => isset($dados['limites']) ? json_encode($dados['limites'], JSON_UNESCAPED_UNICODE) : null,
                 'data_expiracao' => $dados['data_expiracao'] ?? null,
                 'criado_em' => $agora,
-            ]);
+            ] + (isset($dados['plano_id']) ? ['plano_id' => (int) $dados['plano_id']] : []));
             $id = (int) $mestre->insert_id();
             $mestre->insert('tenant_dominios', [
                 'tenant_id' => $id,
@@ -712,16 +720,9 @@ class Tenant_manager
     public function pastaArmazenamento(string $schema): string
     {
         $this->validarNomeSchema($schema);
+        $this->CI->load->helper('armazenamento');
 
-        $anterior = $GLOBALS['mapos_tenant_schema'] ?? null;
-        $GLOBALS['mapos_tenant_schema'] = $schema;
-        try {
-            $this->CI->load->helper('armazenamento');
-
-            return armazenamentoRaiz();
-        } finally {
-            $GLOBALS['mapos_tenant_schema'] = $anterior;
-        }
+        return armazenamentoRaizBase() . DIRECTORY_SEPARATOR . $schema;
     }
 
     /**
@@ -765,6 +766,379 @@ class Tenant_manager
             $CI->db = $dbAnterior;
             $CI->dbforge = $forgeAnterior;
         }
+    }
+
+    /**
+     * Plano e vencimento da empresa. Vencimento em AAAA-MM-DD ou null (sem
+     * vencimento). A cobrança e o bloqueio por vencimento são da Fase 5.
+     */
+    public function alterarPlano(int $id, ?int $planoId, ?string $vencimento): void
+    {
+        if ($this->buscarPorId($id) === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+
+        if ($vencimento !== null) {
+            $partes = preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $vencimento, $m) ? [(int) $m[2], (int) $m[3], (int) $m[1]] : null;
+            if ($partes === null || ! checkdate(...$partes)) {
+                throw new InvalidArgumentException('Data de vencimento inválida.');
+            }
+        }
+
+        $mestre = $this->mestre();
+        if ($planoId !== null && $mestre->where('id', $planoId)->count_all_results('planos') === 0) {
+            throw new InvalidArgumentException('Plano não encontrado.');
+        }
+
+        $mestre->where('id', $id)->update('tenants', [
+            'plano_id' => $planoId,
+            'data_expiracao' => $vencimento,
+            'atualizado_em' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
+     * Consumo atual da empresa, para comparar com o plano: usuários ativos, OS
+     * abertas no mês e espaço dos uploads em MB.
+     *
+     * @return array{usuarios:int, os_mes:int, armazenamento_mb:float}
+     */
+    public function consumo(int $id): array
+    {
+        $tenant = $this->buscarPorId($id);
+        if ($tenant === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+
+        $db = $this->conexao($tenant['schema']);
+        try {
+            $usuarios = (int) $db->where('situacao', 1)->count_all_results('usuarios');
+            $osMes = (int) $db->where('dataInicial >=', date('Y-m-01'))->count_all_results('os');
+        } finally {
+            $db->close();
+        }
+
+        $bytes = 0;
+        $pasta = $this->pastaArmazenamento($tenant['schema']);
+        if (is_dir($pasta)) {
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($pasta, FilesystemIterator::SKIP_DOTS)) as $arquivo) {
+                $bytes += $arquivo->isFile() ? (int) $arquivo->getSize() : 0;
+            }
+        }
+
+        return ['usuarios' => $usuarios, 'os_mes' => $osMes, 'armazenamento_mb' => round($bytes / 1048576, 1)];
+    }
+
+    /**
+     * Tabelas cujo conteúdo não vai para o backup (só a estrutura): sessões,
+     * tentativas de login, tokens e resets são segredos temporários, como no
+     * backup do painel da empresa (Mapos::backup()).
+     */
+    public const BACKUP_SEM_DADOS = ['ci_sessions', 'login_attempts', 'api_refresh_tokens', 'api_rate_limit', 'resets_de_senha'];
+
+    /**
+     * Pasta dos backups das empresas: SAAS_BACKUP_PATH ou STORAGE_PATH/_backups,
+     * fora das pastas das empresas e fechada para o web.
+     */
+    public function pastaBackups(): string
+    {
+        $configurado = rtrim(trim((string) ($_ENV['SAAS_BACKUP_PATH'] ?? '')), '/\\');
+        $this->CI->load->helper('armazenamento');
+        $pasta = $configurado !== '' ? $configurado : armazenamentoRaizBase() . DIRECTORY_SEPARATOR . '_backups';
+
+        if (! is_dir($pasta) && ! @mkdir($pasta, 0750, true) && ! is_dir($pasta)) {
+            throw new RuntimeException('Não foi possível criar a pasta de backups: ' . $pasta);
+        }
+        if (! file_exists($pasta . DIRECTORY_SEPARATOR . '.htaccess')) {
+            @file_put_contents($pasta . DIRECTORY_SEPARATOR . '.htaccess', "<IfModule mod_authz_core.c>\n\tRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n\tOrder allow,deny\n\tDeny from all\n</IfModule>\n");
+        }
+
+        return $pasta;
+    }
+
+    /**
+     * Backup completo de uma empresa num .zip na pasta de backups: banco.sql
+     * (estrutura e dados do schema), os uploads (arquivos/) e a logo e as fotos
+     * de perfil (publicos/). Restaurar: LEIA-ME.txt dentro do arquivo.
+     *
+     * @return array{arquivo:string, caminho:string, tamanho:int}
+     */
+    public function backup(int $id): array
+    {
+        $tenant = $this->buscarPorId($id);
+        if ($tenant === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+        $schema = $tenant['schema'];
+        $this->validarNomeSchema($schema);
+        if (! class_exists(ZipArchive::class)) {
+            throw new RuntimeException('O PHP está sem a extensão zip, necessária para o backup.');
+        }
+
+        $pasta = $this->pastaBackups();
+        $nome = $schema . '-' . date('Ymd-His') . '.zip';
+        $destino = $pasta . DIRECTORY_SEPARATOR . $nome;
+        $sql = $destino . '.sql.tmp';
+
+        try {
+            $this->exportarSchema($schema, $sql);
+
+            $zip = new ZipArchive();
+            if ($zip->open($destino, ZipArchive::CREATE | ZipArchive::EXCL) !== true) {
+                throw new RuntimeException('Não foi possível criar o arquivo de backup.');
+            }
+            $zip->addFile($sql, 'banco.sql');
+
+            $uploads = $this->pastaArmazenamento($schema);
+            if (is_dir($uploads)) {
+                $base = strlen(rtrim($uploads, '/\\')) + 1;
+                foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($uploads, FilesystemIterator::SKIP_DOTS)) as $arquivo) {
+                    if ($arquivo->isFile()) {
+                        $zip->addFile($arquivo->getPathname(), 'arquivos/' . str_replace('\\', '/', substr($arquivo->getPathname(), $base)));
+                    }
+                }
+            }
+
+            foreach ($this->arquivosPublicos($schema) as $relativo => $absoluto) {
+                $zip->addFile($absoluto, 'publicos/' . $relativo);
+            }
+
+            $dominios = array_column($this->dominios($id), 'dominio');
+            $zip->addFromString('LEIA-ME.txt', implode("\n", [
+                'Backup da empresa ' . $tenant['nome'] . ' (código ' . $id . ')',
+                'Schema: ' . $schema,
+                'Domínios: ' . implode(', ', $dominios),
+                'Gerado em: ' . date('d/m/Y H:i:s'),
+                '',
+                'Para restaurar:',
+                '1. Crie o banco: CREATE DATABASE `' . $schema . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;',
+                '2. Importe: mysql ' . $schema . ' < banco.sql',
+                '3. Copie o conteúdo de arquivos/ para STORAGE_PATH/' . $schema . '/',
+                '4. Copie publicos/assets/ para a pasta assets/ do Map-OS.',
+                '5. Se a empresa foi excluída, cadastre de novo o registro em tenants e tenant_dominios no banco mestre.',
+                '',
+            ]));
+
+            if (! $zip->close()) {
+                throw new RuntimeException('Não foi possível gravar o arquivo de backup.');
+            }
+        } catch (Throwable $erro) {
+            @unlink($destino);
+
+            throw $erro;
+        } finally {
+            @unlink($sql);
+        }
+
+        return ['arquivo' => $nome, 'caminho' => $destino, 'tamanho' => (int) filesize($destino)];
+    }
+
+    /**
+     * Backups guardados, do mais novo ao mais antigo.
+     *
+     * @return list<array{arquivo:string, schema:string, tamanho:int, criado_em:int}>
+     */
+    public function listarBackups(?string $schema = null): array
+    {
+        $backups = [];
+        foreach (glob($this->pastaBackups() . DIRECTORY_SEPARATOR . '*.zip') ?: [] as $caminho) {
+            $nome = basename($caminho);
+            if (! preg_match(self::PADRAO_BACKUP, $nome, $m) || ($schema !== null && $m[1] !== $schema)) {
+                continue;
+            }
+            $backups[] = ['arquivo' => $nome, 'schema' => $m[1], 'tamanho' => (int) filesize($caminho), 'criado_em' => (int) filemtime($caminho)];
+        }
+        usort($backups, static fn ($a, $b) => strcmp($b['arquivo'], $a['arquivo']));
+
+        return $backups;
+    }
+
+    /** Nome de arquivo de backup: <schema>-AAAAMMDD-HHMMSS.zip */
+    public const PADRAO_BACKUP = '/^(mapos_[a-z0-9_]{1,50})-(\d{8}-\d{6})\.zip$/';
+
+    /** Caminho de um backup pelo nome, ou null se o nome não é de backup ou não existe. */
+    public function caminhoBackup(string $arquivo): ?string
+    {
+        if (! preg_match(self::PADRAO_BACKUP, $arquivo)) {
+            return null;
+        }
+        $caminho = $this->pastaBackups() . DIRECTORY_SEPARATOR . $arquivo;
+
+        return is_file($caminho) ? $caminho : null;
+    }
+
+    /**
+     * Exclusão definitiva de uma empresa cancelada (LGPD): gera o backup
+     * final e só então apaga o schema, a pasta de uploads, a logo e as fotos
+     * de perfil, o consumo e o registro no mestre (os domínios vão junto). A
+     * trilha de auditoria do painel fica.
+     *
+     * Se o backup falhar, nada é apagado.
+     *
+     * @return array{backup:string}
+     */
+    public function excluirTenant(int $id): array
+    {
+        $tenant = $this->buscarPorId($id);
+        if ($tenant === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+        if ($tenant['status'] !== 'cancelado') {
+            throw new RuntimeException('Só uma empresa cancelada pode ser excluída. Cancele antes.');
+        }
+
+        $schema = $tenant['schema'];
+        $backup = $this->backup($id);
+        $publicos = $this->schemaExiste($schema) ? $this->arquivosPublicos($schema) : [];
+
+        $this->excluirSchema($schema);
+        $this->apagarPasta($this->pastaArmazenamento($schema));
+        foreach ($publicos as $absoluto) {
+            @unlink($absoluto);
+        }
+
+        $mestre = $this->mestre();
+        $mestre->trans_begin();
+        $mestre->where('tenant_id', $id)->delete('tenant_usage');
+        $mestre->where('id', $id)->delete('tenants');
+        if ($mestre->trans_status() === false) {
+            $mestre->trans_rollback();
+
+            throw new RuntimeException('O schema foi apagado, mas o registro da empresa ficou no mestre: ' . ($mestre->error()['message'] ?? ''));
+        }
+        $mestre->trans_commit();
+
+        return ['backup' => $backup['arquivo']];
+    }
+
+    /**
+     * Despeja estrutura e dados do schema em SQL, linha a linha (sem carregar
+     * a tabela inteira na memória).
+     */
+    protected function exportarSchema(string $schema, string $arquivo): void
+    {
+        $db = $this->conexao($schema);
+        $saida = fopen($arquivo, 'wb');
+        if ($saida === false) {
+            $db->close();
+
+            throw new RuntimeException('Não foi possível gravar o backup em ' . $arquivo);
+        }
+
+        try {
+            /** @var mysqli $mysqli */
+            $mysqli = $db->conn_id;
+            fwrite($saida, "-- Backup do schema {$schema}, " . date('Y-m-d H:i:s') . "\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n\n");
+
+            $tabelas = [];
+            $views = [];
+            $lista = $mysqli->query('SHOW FULL TABLES');
+            if (! $lista instanceof mysqli_result) {
+                throw new RuntimeException('Erro de banco: ' . $mysqli->error);
+            }
+            while ($linha = $lista->fetch_row()) {
+                if ($linha[1] === 'VIEW') {
+                    $views[] = $linha[0];
+                } else {
+                    $tabelas[] = $linha[0];
+                }
+            }
+            $lista->free();
+
+            foreach ($tabelas as $tabela) {
+                $nome = '`' . str_replace('`', '``', $tabela) . '`';
+                $criar = $mysqli->query('SHOW CREATE TABLE ' . $nome);
+                if (! $criar instanceof mysqli_result) {
+                    throw new RuntimeException('Erro de banco: ' . $mysqli->error);
+                }
+                fwrite($saida, "DROP TABLE IF EXISTS {$nome};\n" . $criar->fetch_row()[1] . ";\n\n");
+                $criar->free();
+
+                if (in_array($tabela, self::BACKUP_SEM_DADOS, true)) {
+                    continue;
+                }
+
+                $linhas = $mysqli->query('SELECT * FROM ' . $nome, MYSQLI_USE_RESULT);
+                if (! $linhas instanceof mysqli_result) {
+                    throw new RuntimeException('Erro de banco: ' . $mysqli->error);
+                }
+                $colunas = implode(', ', array_map(static fn ($c) => '`' . str_replace('`', '``', $c->name) . '`', $linhas->fetch_fields()));
+                $lote = [];
+                while ($linha = $linhas->fetch_row()) {
+                    $lote[] = '(' . implode(', ', array_map(static fn ($v) => $v === null ? 'NULL' : "'" . $mysqli->real_escape_string((string) $v) . "'", $linha)) . ')';
+                    if (count($lote) === 200) {
+                        fwrite($saida, "INSERT INTO {$nome} ({$colunas}) VALUES\n" . implode(",\n", $lote) . ";\n");
+                        $lote = [];
+                    }
+                }
+                if ($lote !== []) {
+                    fwrite($saida, "INSERT INTO {$nome} ({$colunas}) VALUES\n" . implode(",\n", $lote) . ";\n");
+                }
+                $linhas->free();
+                fwrite($saida, "\n");
+            }
+
+            foreach ($views as $view) {
+                $nome = '`' . str_replace('`', '``', $view) . '`';
+                $criar = $mysqli->query('SHOW CREATE VIEW ' . $nome);
+                if ($criar instanceof mysqli_result) {
+                    fwrite($saida, "DROP VIEW IF EXISTS {$nome};\n" . $criar->fetch_row()[1] . ";\n\n");
+                    $criar->free();
+                }
+            }
+
+            fwrite($saida, "SET FOREIGN_KEY_CHECKS = 1;\n");
+        } finally {
+            fclose($saida);
+            $db->close();
+        }
+    }
+
+    /**
+     * Logo do emitente e fotos de perfil da empresa, que ficam em assets/
+     * numa pasta comum a todas: só os arquivos que o banco dela cita.
+     *
+     * @return array<string, string> caminho relativo (assets/...) => absoluto
+     */
+    protected function arquivosPublicos(string $schema): array
+    {
+        $db = $this->conexao($schema);
+        try {
+            $logos = array_column($db->select('url_logo')->get('emitente')->result_array() ?: [], 'url_logo');
+            $fotos = array_column($db->select('url_image_user')->get('usuarios')->result_array() ?: [], 'url_image_user');
+        } finally {
+            $db->close();
+        }
+
+        $arquivos = [];
+        foreach (['assets/uploads' => $logos, 'assets/userImage' => $fotos] as $pasta => $valores) {
+            foreach ($valores as $valor) {
+                $nome = basename((string) parse_url((string) $valor, PHP_URL_PATH));
+                if ($nome === '' || ! preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $nome) || in_array(strtolower($nome), ['index.html', '.htaccess'], true)) {
+                    continue;
+                }
+                $absoluto = rtrim(FCPATH, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $pasta) . DIRECTORY_SEPARATOR . $nome;
+                if (is_file($absoluto)) {
+                    $arquivos[$pasta . '/' . $nome] = $absoluto;
+                }
+            }
+        }
+
+        return $arquivos;
+    }
+
+    /** Apaga a pasta e tudo dentro dela (pasta de uploads de uma empresa). */
+    protected function apagarPasta(string $pasta): void
+    {
+        if (! is_dir($pasta)) {
+            return;
+        }
+
+        $itens = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($pasta, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($itens as $item) {
+            $item->isDir() && ! $item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($pasta);
     }
 
     /**

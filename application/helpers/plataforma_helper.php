@@ -43,7 +43,63 @@ if (! function_exists('plataformaAcaoLegivel')) {
             'dominio_adicionado' => 'Cadastrou domínio próprio',
             'dominio_verificado' => 'Verificou domínio próprio',
             'senha_redefinida' => 'Gerou nova senha para usuário',
-            'conta_criada' => 'Conta da plataforma criada',
+            'conta_criada' => 'Criou conta do painel',
+            'conta_desativada' => 'Desativou conta do painel',
+            'conta_reativada' => 'Reativou conta do painel',
+            'conta_senha' => 'Gerou nova senha para conta do painel',
+            'conta_2fa_redefinido' => 'Redefiniu o 2FA de conta do painel',
+            '2fa_ativado' => 'Ativou o 2FA da própria conta',
+            '2fa_codigos' => 'Gerou novos códigos de recuperação',
+            'senha_propria' => 'Trocou a própria senha',
+            'empresa_cancelada' => 'Cancelou a empresa',
+            'empresa_excluida' => 'Excluiu a empresa definitivamente',
+            'empresa_plano' => 'Alterou plano e vencimento',
+            'backup_gerado' => 'Gerou backup',
+            'backup_baixado' => 'Baixou backup',
+            'plano_criado' => 'Criou plano',
+            'plano_alterado' => 'Alterou plano',
+            'plano_desativado' => 'Desativou plano',
+            'plano_reativado' => 'Reativou plano',
         ][$acao] ?? $acao;
+    }
+}
+
+if (! function_exists('plataformaTamanho')) {
+    /** Tamanho de arquivo legível: "820 KB", "12,4 MB". */
+    function plataformaTamanho(int $bytes): string
+    {
+        if ($bytes < 1048576) {
+            return number_format(max(1, (int) ceil($bytes / 1024)), 0, ',', '.') . ' KB';
+        }
+
+        return number_format($bytes / 1048576, 1, ',', '.') . ' MB';
+    }
+}
+
+if (! function_exists('plataformaVencimentoPill')) {
+    /**
+     * Props do pill-status do vencimento do plano, ou null sem vencimento.
+     * Vencida: danger; vence em até 7 dias: warning; depois: neutral.
+     *
+     * @return array{label: string, variant: string}|null
+     */
+    function plataformaVencimentoPill(?string $vencimento, ?int $hoje = null): ?array
+    {
+        if ($vencimento === null || $vencimento === '') {
+            return null;
+        }
+
+        $hoje ??= strtotime(date('Y-m-d'));
+        $dia = strtotime($vencimento);
+        $data = date('d/m/Y', (int) $dia);
+
+        if ($dia < $hoje) {
+            return ['label' => 'Venceu em ' . $data, 'variant' => 'danger'];
+        }
+        if ($dia <= $hoje + 7 * 86400) {
+            return ['label' => 'Vence em ' . $data, 'variant' => 'warning'];
+        }
+
+        return ['label' => 'Vence em ' . $data, 'variant' => 'neutral'];
     }
 }

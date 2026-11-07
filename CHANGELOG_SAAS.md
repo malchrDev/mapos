@@ -9,6 +9,14 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07, gestão do painel)
+- 2FA obrigatório nas contas do painel da plataforma (migration do mestre `20261108000000`): login em dois passos, ativação em Minha conta, códigos de recuperação, sem "desativar". CLI `tools plataforma_2fa` para redefinir.
+- Minha conta: novos códigos de recuperação e troca da própria senha (mínimo 12 caracteres; as outras sessões caem).
+- Contas do painel: criar, desativar, reativar, nova senha e redefinir 2FA de outra conta; ações que entregam acesso pedem a senha de quem faz; a última conta ativa não pode ser desativada.
+- Planos (migration do mestre `20261108000100`, nasce com "Cortesia"): preço mensal ou cortesia, limites de usuários, OS por mês e armazenamento. A empresa recebe plano e vencimento, e a tela dela mostra o consumo contra os limites. Cobrança e bloqueio ficam para a Fase 5.
+- Backup por empresa (.zip com banco, uploads, logo, fotos de perfil e instruções), tela de backups com download auditado. `SAAS_BACKUP_PATH` no `.env`.
+- Cancelar empresa e excluir definitivamente (LGPD): só cancelada, com o endereço digitado e a senha, e backup final antes de apagar schema, arquivos e registro.
+
 ### Security (2026-11-07, API)
 - Token da API preso à empresa: chave de assinatura derivada do `API_JWT_KEY` e do schema, e claim `ten`. Antes, o token do admin ou de um cliente da loja1 valia na loja2 como a conta de mesmo id (reproduzido pelo nginx: `200` com os clientes da loja2; agora `403`).
 

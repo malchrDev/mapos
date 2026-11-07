@@ -112,13 +112,57 @@ hostname (`Plataforma_Controller`), mesmo chamados pelo nome.
 | Tela | O que faz |
 | --- | --- |
 | `/login` | Entrada (superfície escura do DESIGN.md), com `Limite_login` no escopo `plataforma` |
-| `/empresas` | Lista com busca (nome, CPF/CNPJ, domínio) e filtro de status |
-| `/empresas/nova` | Cria a empresa (provisionamento) e mostra a senha do admin **uma vez** |
-| `/empresas/<id>` | Status, domínios (com o TXT de verificação), usuários e histórico |
+| `/login/codigo` | Segundo passo: código do aplicativo autenticador ou de recuperação (5 min, 5 tentativas) |
+| `/conta` | Minha conta: ativar o 2FA, novos códigos de recuperação, trocar a senha |
+| `/empresas` | Lista com busca (nome, CPF/CNPJ, domínio), filtro de status, plano e vencimento |
+| `/empresas/nova` | Cria a empresa (provisionamento), com plano opcional, e mostra a senha do admin **uma vez** |
+| `/empresas/<id>` | Status, plano e vencimento, consumo, domínios, usuários, backups e histórico |
 | — suspender / reativar | Suspensa, os endereços da empresa respondem 404; os dados ficam |
+| — cancelar | Como suspender, mas é o passo antes da exclusão; grava `cancelado_em` |
+| — excluir definitivamente | Só cancelada; pede o endereço digitado e a senha; gera o backup final antes |
+| — backup | Gera agora um .zip com banco, uploads, logo e fotos de perfil |
 | — domínio próprio | Cadastra e verifica pelo TXT no DNS |
 | — nova senha | Para qualquer usuário da empresa; encerra as sessões e tokens dele |
+| `/planos` | Planos: nome, preço mensal ou cortesia, limites; desativar tira de novas empresas |
+| `/backups` | Todos os backups, inclusive o final das empresas excluídas; download com auditoria |
+| `/contas` | Contas do painel: criar, desativar, reativar, nova senha, redefinir 2FA |
 | `/auditoria` | Trilha de todas as ações do painel (`plataforma_auditoria`) |
+
+**2FA obrigatório.** A conta do painel que ainda não ativou o 2FA entra só até
+`/conta`; o resto redireciona para lá (`Plataforma_Controller::exigirLogin()`).
+Mesmo desenho do 2FA dos usuários das empresas: segredo cifrado com a
+`encryption_key`, código do aplicativo de uso único (`totp_ultimo_passo`, com
+`UPDATE` condicional contra requisições simultâneas) e 10 códigos de
+recuperação guardados como SHA-256 (`plataforma_codigos_recuperacao`). Não há
+"desativar": perdido o celular e os códigos, outra conta redefine em `/contas`,
+ou no servidor:
+
+```bash
+php index.php tools plataforma_2fa "email"   # @ como %40
+```
+
+**Ações que entregam acesso** (criar conta, nova senha, redefinir 2FA, excluir
+empresa) pedem a senha de quem faz, com limite de tentativas (escopo
+`confirmacao`). A última conta ativa não pode ser desativada, e ninguém mexe na
+própria conta por `/contas`.
+
+**Planos** (`planos`, migration `20261108000100`) guardam preço e limites
+(`limite_usuarios`, `limite_os_mes`, `limite_armazenamento_mb`; vazio = sem
+limite) e nascem com o plano **Cortesia**. A empresa guarda `plano_id` e o
+vencimento em `data_expiracao`. A tela da empresa compara o consumo atual com os
+limites, mas **nada é bloqueado ainda**: cobrança, bloqueio por vencimento e por
+limite são da Fase 5, com a integração de pagamento.
+
+**Backup e exclusão.** `Tenant_manager::backup()` despeja o schema em SQL linha a
+linha (sem carregar a tabela na memória; sessões, tentativas de login e tokens
+só com a estrutura), e junta os uploads (`STORAGE_PATH/<schema>/`), a logo e as
+fotos de perfil citadas no banco da empresa, mais um `LEIA-ME.txt` com a
+restauração. Os arquivos ficam em `SAAS_BACKUP_PATH` ou `STORAGE_PATH/_backups`,
+com `.htaccess` negando o acesso; só saem por `/backups/<arquivo>`, com login.
+`excluirTenant()` só aceita empresa cancelada e gera o backup final antes de
+apagar schema, uploads, logo, fotos, consumo e registro (os domínios vão junto,
+a auditoria fica). Se o backup falhar, nada é apagado. O backup final também
+tem dados pessoais: defina um prazo de guarda e apague-o depois.
 
 Contas do painel (`plataforma_usuarios`) e usuários das empresas não se
 misturam: um admin de empresa não entra no painel, e uma conta do painel não
@@ -200,8 +244,8 @@ para a pasta de outra empresa é recusado por `armazenamentoLocalizar()`.
 A logo do emitente e as fotos de perfil continuam em `assets/uploads` e
 `assets/userImage`, numa pasta comum a todas as empresas. São públicas por
 desenho e têm nome aleatório; cada empresa só aponta para os próprios arquivos
-pelo banco dela. Na exclusão de uma empresa (Fase 6) eles precisam ser apagados
-a partir de `emitente.url_logo` e `usuarios.url_image_user` do schema.
+pelo banco dela. O backup e a exclusão de uma empresa levam os dela, achados por
+`emitente.url_logo` e `usuarios.url_image_user` do schema.
 
 **Ao converter uma instalação única em tenant**, mova o conteúdo de
 `STORAGE_PATH` para `STORAGE_PATH/<schema>/`, mantendo as subpastas.
@@ -261,10 +305,9 @@ Fora do container (sem `DB_MASTER_DATABASE`) os testes são pulados.
 `excluirSchema()` faz `DROP DATABASE` do schema inteiro — o direito ao
 esquecimento da empresa é uma operação, não uma varredura linha por linha. Apagar
 o registro em `tenants` leva os domínios junto (`ON DELETE CASCADE`).
-`provisionar()` só a chama em uma tentativa que falhou; a exclusão definitiva de um
-tenant em produção é da Fase 6 (backup por tenant). Ela também precisa apagar
-`pastaArmazenamento($schema)` e a logo e as fotos de perfil da empresa (ver
-"Uploads por empresa").
+`provisionar()` só a chama em uma tentativa que falhou. A exclusão definitiva de
+uma empresa é `excluirTenant()`, pelo painel (ver "Backup e exclusão" acima):
+backup final, schema, pasta de uploads, logo e fotos de perfil.
 
 O nome do schema entra em SQL cru (`CREATE`/`DROP DATABASE` não aceita binding),
 então `validarNomeSchema()` só aceita `mapos_` + `[a-z0-9_]{1,50}` e recusa o

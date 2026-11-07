@@ -26,20 +26,32 @@ if (! function_exists('armazenamentoRaiz')) {
      */
     function armazenamentoRaiz(): string
     {
-        $configurado = trim((string) ($_ENV['STORAGE_PATH'] ?? ''));
-
-        if ($configurado === '') {
-            $raiz = rtrim(APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'storage';
-        } else {
-            if (! armazenamentoCaminhoAbsoluto($configurado)) {
-                $configurado = rtrim(FCPATH, '/\\') . DIRECTORY_SEPARATOR . $configurado;
-            }
-            $raiz = rtrim($configurado, '/\\');
-        }
-
+        $raiz = armazenamentoRaizBase();
         $schema = armazenamentoTenant();
 
         return $schema === null ? $raiz : $raiz . DIRECTORY_SEPARATOR . $schema;
+    }
+}
+
+if (! function_exists('armazenamentoRaizBase')) {
+    /**
+     * STORAGE_PATH (ou application/storage) sem a subpasta da empresa. Só a
+     * plataforma usa direto (backups, pasta de uma empresa); telas de empresa
+     * usam armazenamentoRaiz().
+     */
+    function armazenamentoRaizBase(): string
+    {
+        $configurado = trim((string) ($_ENV['STORAGE_PATH'] ?? ''));
+
+        if ($configurado === '') {
+            return rtrim(APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'storage';
+        }
+
+        if (! armazenamentoCaminhoAbsoluto($configurado)) {
+            $configurado = rtrim(FCPATH, '/\\') . DIRECTORY_SEPARATOR . $configurado;
+        }
+
+        return rtrim($configurado, '/\\');
     }
 }
 

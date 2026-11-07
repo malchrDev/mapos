@@ -20,12 +20,29 @@ $route = [
 
     'login' => 'plataforma_acesso',
     'login/entrar' => 'plataforma_acesso/entrar',
+    'login/codigo' => 'plataforma_acesso/codigo',
+    'login/verificar' => 'plataforma_acesso/verificar',
     'sair' => 'plataforma_acesso/sair',
+
+    'conta' => 'plataforma_conta',
+    'conta/(ativar|codigos|senha)' => 'plataforma_conta/$1',
 
     'empresas' => 'plataforma_empresas',
     'empresas/nova' => 'plataforma_empresas/nova',
     'empresas/(:num)' => 'plataforma_empresas/ver/$1',
-    'empresas/(:num)/(status|dominio|verificar|senha)' => 'plataforma_empresas/$2/$1',
+    'empresas/(:num)/(status|dominio|verificar|senha|plano|backup|excluir)' => 'plataforma_empresas/$2/$1',
+
+    'contas' => 'plataforma_equipe',
+    'contas/nova' => 'plataforma_equipe/nova',
+    'contas/(status|senha|redefinir2fa)' => 'plataforma_equipe/$1',
+
+    'planos' => 'plataforma_planos',
+    'planos/novo' => 'plataforma_planos/formulario',
+    'planos/(:num)' => 'plataforma_planos/formulario/$1',
+    'planos/(:num)/status' => 'plataforma_planos/status/$1',
+
+    'backups' => 'plataforma_backups',
+    'backups/(mapos_[a-z0-9_]+-[0-9]{8}-[0-9]{6}\.zip)' => 'plataforma_backups/baixar/$1',
 
     'auditoria' => 'plataforma_auditoria',
 

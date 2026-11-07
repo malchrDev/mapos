@@ -63,8 +63,107 @@ class Plataforma_acesso extends Plataforma_Controller
             return $this->responder(false, 'Os dados de acesso estão incorretos.');
         }
 
-        $this->limite_login->registrarSucesso('plataforma', $email);
+        // 2FA ativo: a senha sozinha não entra. A sessão guarda só que a senha
+        // conferiu, por 5 minutos e 5 tentativas; o contador de falhas do
+        // Limite_login só zera com o código certo.
+        if (($conta->totp_ativado_em ?? null) !== null) {
+            $this->session->sess_regenerate(true);
+            $this->session->set_userdata('plataforma_2fa', ['id' => (int) $conta->id, 'expira' => time() + self::DOIS_FATORES_VALIDADE, 'tentativas' => 0]);
 
+            return $this->responder(true, '', site_url('login/codigo'));
+        }
+
+        // Sem 2FA ainda (conta nova): entra, mas exigirLogin() só deixa chegar
+        // à tela de ativação.
+        $this->limite_login->registrarSucesso('plataforma', $email);
+        $this->iniciarSessao($conta);
+
+        return $this->responder(true, '', site_url('conta'));
+    }
+
+    /** Segundo passo do login: código do aplicativo ou de recuperação. */
+    public function codigo()
+    {
+        if ($this->doisFatoresPendente() === null) {
+            $this->session->set_flashdata('error', 'Entre com e-mail e senha primeiro.');
+
+            return redirect(site_url('login'));
+        }
+
+        $this->load->view('plataforma/login_codigo', ['erro' => $this->session->flashdata('error')]);
+    }
+
+    public function verificar()
+    {
+        $pendente = $this->doisFatoresPendente();
+        if ($pendente === null || $this->input->method() !== 'post') {
+            $this->session->set_flashdata('error', 'Entre com e-mail e senha primeiro.');
+
+            return redirect(site_url('login'));
+        }
+
+        $conta = $this->plataforma_contas->porId((int) $pendente['id']);
+        $email = (string) ($conta->email ?? '');
+        $ip = (string) $this->input->ip_address();
+
+        $this->load->library('Limite_login', [
+            'auditar' => fn (string $tarefa, string $ipBloqueado) => $this->plataforma_contas->auditar(null, 'login_bloqueado', $tarefa, $ipBloqueado),
+        ]);
+        $this->load->library('Totp');
+
+        if ($this->limite_login->bloqueado('plataforma', $email, $ip)) {
+            $this->session->unset_userdata('plataforma_2fa');
+            $this->session->set_flashdata('error', Limite_login::MENSAGEM);
+
+            return redirect(site_url('login'));
+        }
+
+        $codigo = trim((string) $this->input->post('codigo'));
+        $ok = $conta !== null && (int) $conta->ativo === 1 && $this->plataforma_contas->aceitarCodigo($this->totp, $conta, $codigo);
+
+        if (! $ok) {
+            $this->limite_login->registrarFalha('plataforma', $email, $ip);
+            $pendente['tentativas']++;
+
+            if ($pendente['tentativas'] >= self::DOIS_FATORES_TENTATIVAS) {
+                $this->session->unset_userdata('plataforma_2fa');
+                $this->session->set_flashdata('error', 'Código incorreto várias vezes. Entre de novo com e-mail e senha.');
+
+                return redirect(site_url('login'));
+            }
+
+            $this->session->set_userdata('plataforma_2fa', $pendente);
+            $this->session->set_flashdata('error', 'Código incorreto. Confira o aplicativo ou use um código de recuperação.');
+
+            return redirect(site_url('login/codigo'));
+        }
+
+        $this->limite_login->registrarSucesso('plataforma', $email);
+        $this->session->unset_userdata('plataforma_2fa');
+        $this->iniciarSessao($conta);
+
+        return redirect(site_url('empresas'));
+    }
+
+    private const DOIS_FATORES_VALIDADE = 300;
+
+    private const DOIS_FATORES_TENTATIVAS = 5;
+
+    /** @return array{id:int, expira:int, tentativas:int}|null */
+    private function doisFatoresPendente(): ?array
+    {
+        $pendente = $this->session->userdata('plataforma_2fa');
+        if (! is_array($pendente) || (int) ($pendente['expira'] ?? 0) < time()) {
+            $this->session->unset_userdata('plataforma_2fa');
+
+            return null;
+        }
+
+        return $pendente;
+    }
+
+    private function iniciarSessao(object $conta): void
+    {
         $this->session->sess_regenerate(true);
         $this->session->set_userdata([
             'plataforma_id' => (int) $conta->id,
@@ -73,8 +172,6 @@ class Plataforma_acesso extends Plataforma_Controller
         $this->plataforma_contas->registrarLogin((int) $conta->id);
         $this->conta = $conta;
         $this->auditar('login');
-
-        return $this->responder(true);
     }
 
     public function sair()
@@ -96,9 +193,9 @@ class Plataforma_acesso extends Plataforma_Controller
         show_404();
     }
 
-    private function responder(bool $ok, string $mensagem = '')
+    private function responder(bool $ok, string $mensagem = '', ?string $destino = null)
     {
-        $resposta = ['result' => $ok];
+        $resposta = ['result' => $ok] + ($destino !== null ? ['destino' => $destino] : []);
         if (! $ok) {
             // Token CSRF novo para a próxima tentativa (csrf_regenerate).
             $resposta += ['message' => $mensagem, 'MAPOS_TOKEN' => $this->security->get_csrf_hash()];

@@ -60,6 +60,37 @@ final class PlataformaRotasTest extends MaposTestCase
         $this->assertSame('plataforma_auditoria', self::destino('auditoria'));
     }
 
+    public function testRotasDaGestaoDoPainel(): void
+    {
+        $this->assertSame('plataforma_acesso/codigo', self::destino('login/codigo'));
+        $this->assertSame('plataforma_acesso/verificar', self::destino('login/verificar'));
+        $this->assertSame('plataforma_conta', self::destino('conta'));
+        $this->assertSame('plataforma_conta/ativar', self::destino('conta/ativar'));
+        $this->assertSame('plataforma_conta/senha', self::destino('conta/senha'));
+        $this->assertSame('plataforma_equipe', self::destino('contas'));
+        $this->assertSame('plataforma_equipe/redefinir2fa', self::destino('contas/redefinir2fa'));
+        $this->assertSame('plataforma_planos/formulario', self::destino('planos/novo'));
+        $this->assertSame('plataforma_planos/formulario/3', self::destino('planos/3'));
+        $this->assertSame('plataforma_planos/status/3', self::destino('planos/3/status'));
+        $this->assertSame('plataforma_empresas/excluir/12', self::destino('empresas/12/excluir'));
+        $this->assertSame('plataforma_empresas/backup/12', self::destino('empresas/12/backup'));
+        $this->assertSame('plataforma_empresas/plano/12', self::destino('empresas/12/plano'));
+        $this->assertSame('plataforma_backups', self::destino('backups'));
+        $this->assertSame('plataforma_backups/baixar/mapos_loja_ab12cd-20261108-101500.zip', self::destino('backups/mapos_loja_ab12cd-20261108-101500.zip'));
+    }
+
+    public function testVencimentoDoPlanoUsaAPaletaSemantica(): void
+    {
+        $hoje = strtotime('2026-11-08');
+
+        $this->assertNull(plataformaVencimentoPill(null, $hoje));
+        $this->assertSame('danger', plataformaVencimentoPill('2026-11-07', $hoje)['variant']);
+        $this->assertSame('warning', plataformaVencimentoPill('2026-11-15', $hoje)['variant']);
+        $this->assertSame('neutral', plataformaVencimentoPill('2026-12-31', $hoje)['variant']);
+        $this->assertSame('1 KB', plataformaTamanho(10));
+        $this->assertSame('2,0 MB', plataformaTamanho(2 * 1048576));
+    }
+
     /**
      * @dataProvider urisForaDoPainel
      */
@@ -80,7 +111,11 @@ final class PlataformaRotasTest extends MaposTestCase
             'controller do painel pelo nome' => ['plataforma_empresas/ver/1'],
             'ferramentas' => ['tools/migrate'],
             'empresa sem id numérico' => ['empresas/abc'],
-            'ação inexistente' => ['empresas/1/excluir'],
+            'ação inexistente' => ['empresas/1/apagar'],
+            'conta com ação inexistente' => ['conta/desativar'],
+            'backup fora do padrão de nome' => ['backups/..%2F.env'],
+            'backup com outra extensão' => ['backups/mapos_loja-20261108-101500.sql'],
+            'ação de conta pelo id na URL' => ['contas/2/senha'],
         ];
     }
 

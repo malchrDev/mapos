@@ -16,10 +16,14 @@ require_once __DIR__ . '/../core/Plataforma_Controller.php';
  */
 class Plataforma_empresas extends Plataforma_Controller
 {
+    /** @var Catalogo_planos */
+    public $catalogo_planos;
+
     public function __construct()
     {
         parent::__construct();
         $this->exigirLogin();
+        $this->load->library('Catalogo_planos');
     }
 
     public function index()
@@ -37,7 +41,8 @@ class Plataforma_empresas extends Plataforma_Controller
 
     public function nova()
     {
-        $valores = ['nome' => '', 'subdominio' => '', 'admin_email' => '', 'admin_nome' => '', 'documento' => ''];
+        $valores = ['nome' => '', 'subdominio' => '', 'admin_email' => '', 'admin_nome' => '', 'documento' => '', 'plano_id' => ''];
+        $planos = $this->catalogo_planos->listar(true);
         $erros = [];
 
         if ($this->input->method() === 'post') {
@@ -53,6 +58,9 @@ class Plataforma_empresas extends Plataforma_Controller
                 ['field' => 'admin_nome', 'label' => 'Nome do administrador', 'rules' => 'max_length[80]'],
                 ['field' => 'documento', 'label' => 'CPF/CNPJ', 'rules' => 'max_length[20]'],
             ]);
+            if ($valores['plano_id'] !== '' && ! in_array((int) $valores['plano_id'], array_map('intval', array_column($planos, 'id')), true)) {
+                $erros['plano_id'] = 'Escolha um dos planos ativos.';
+            }
 
             if ($erros === []) {
                 $dominio = $this->dominioDoSubdominio($valores['subdominio']);
@@ -65,6 +73,7 @@ class Plataforma_empresas extends Plataforma_Controller
                         'documento' => $valores['documento'] ?: null,
                         'admin_email' => $valores['admin_email'],
                         'admin_nome' => $valores['admin_nome'],
+                        'plano_id' => $valores['plano_id'] !== '' ? (int) $valores['plano_id'] : null,
                     ]);
                 } catch (InvalidArgumentException $e) {
                     $erros['_geral'] = $e->getMessage();
@@ -96,6 +105,7 @@ class Plataforma_empresas extends Plataforma_Controller
             'valores' => $valores,
             'erros' => $erros,
             'dominioBase' => Tenant_manager::dominioBase(),
+            'planos' => $planos,
         ], 'Nova empresa', 'empresas');
     }
 
@@ -112,8 +122,31 @@ class Plataforma_empresas extends Plataforma_Controller
             log_message('error', 'plataforma: usuários do tenant ' . $tenant['id'] . ': ' . $e->getMessage());
         }
 
+        try {
+            $consumo = $this->tenant_manager->consumo((int) $tenant['id']);
+        } catch (Throwable $e) {
+            $consumo = null;
+            log_message('error', 'plataforma: consumo do tenant ' . $tenant['id'] . ': ' . $e->getMessage());
+        }
+
+        try {
+            $backups = $this->tenant_manager->listarBackups((string) $tenant['schema']);
+        } catch (RuntimeException $e) {
+            $backups = [];
+        }
+
+        $plano = ! empty($tenant['plano_id']) ? $this->catalogo_planos->porId((int) $tenant['plano_id']) : null;
+        $planos = $this->catalogo_planos->listar(true);
+        if ($plano !== null && ! in_array((int) $plano['id'], array_map('intval', array_column($planos, 'id')), true)) {
+            $planos[] = $plano; // plano desativado em que a empresa ainda está
+        }
+
         $this->tela('plataforma/empresas/ver', [
             'tenant' => $tenant,
+            'plano' => $plano,
+            'planos' => $planos,
+            'consumo' => $consumo,
+            'backups' => $backups,
             'dominios' => $this->tenant_manager->dominios((int) $tenant['id']),
             'usuarios' => $usuarios,
             'erroUsuarios' => $erroUsuarios,
@@ -129,17 +162,19 @@ class Plataforma_empresas extends Plataforma_Controller
         $this->exigirPost('empresas/' . $tenant['id']);
 
         $novo = (string) $this->input->post('status');
-        if (! in_array($novo, ['ativo', 'suspenso'], true) || $novo === $tenant['status']) {
+        if (! in_array($novo, Tenant_manager::STATUS, true) || $novo === $tenant['status']) {
             $this->session->set_flashdata('error', 'Status inválido para esta empresa.');
 
             return redirect(site_url('empresas/' . $tenant['id']));
         }
 
         $this->tenant_manager->alterarStatus((int) $tenant['id'], $novo);
-        $this->auditar($novo === 'ativo' ? 'empresa_reativada' : 'empresa_suspensa', null, (int) $tenant['id']);
-        $this->session->set_flashdata('success', $novo === 'ativo'
-            ? $tenant['nome'] . ' foi reativada e voltou a acessar o sistema.'
-            : $tenant['nome'] . ' foi suspensa: os endereços dela deixam de abrir. Os dados continuam guardados.');
+        $this->auditar(['ativo' => 'empresa_reativada', 'suspenso' => 'empresa_suspensa', 'cancelado' => 'empresa_cancelada'][$novo], null, (int) $tenant['id']);
+        $this->session->set_flashdata('success', [
+            'ativo' => $tenant['nome'] . ' foi reativada e voltou a acessar o sistema.',
+            'suspenso' => $tenant['nome'] . ' foi suspensa: os endereços dela deixam de abrir. Os dados continuam guardados.',
+            'cancelado' => $tenant['nome'] . ' foi cancelada: os endereços dela deixam de abrir. Os dados continuam guardados até a exclusão definitiva.',
+        ][$novo]);
 
         return redirect(site_url('empresas/' . $tenant['id']));
     }
@@ -218,6 +253,97 @@ class Plataforma_empresas extends Plataforma_Controller
             'senha' => $senha,
             'voltar' => site_url('empresas/' . $tenant['id']),
         ], 'Senha redefinida', 'empresas');
+    }
+
+    /** POST plano_id (vazio = sem plano), vencimento (AAAA-MM-DD ou vazio). */
+    public function plano($id = null)
+    {
+        $tenant = $this->tenantOu404($id);
+        $this->exigirPost('empresas/' . $tenant['id']);
+
+        $planoId = trim((string) $this->input->post('plano_id'));
+        $vencimento = trim((string) $this->input->post('vencimento'));
+
+        try {
+            $this->tenant_manager->alterarPlano((int) $tenant['id'], $planoId !== '' ? (int) $planoId : null, $vencimento !== '' ? $vencimento : null);
+            $plano = $planoId !== '' ? $this->catalogo_planos->porId((int) $planoId) : null;
+            $this->auditar('empresa_plano', ($plano['nome'] ?? 'sem plano') . ($vencimento !== '' ? ', vence em ' . date('d/m/Y', (int) strtotime($vencimento)) : ', sem vencimento'), (int) $tenant['id']);
+            $this->session->set_flashdata('success', 'Plano e vencimento de ' . $tenant['nome'] . ' atualizados.');
+        } catch (InvalidArgumentException|RuntimeException $e) {
+            $this->session->set_flashdata('error', $e->getMessage());
+        }
+
+        redirect(site_url('empresas/' . $tenant['id']));
+    }
+
+    /** POST: gera um backup completo agora. */
+    public function backup($id = null)
+    {
+        $tenant = $this->tenantOu404($id);
+        $this->exigirPost('empresas/' . $tenant['id']);
+
+        try {
+            $backup = $this->tenant_manager->backup((int) $tenant['id']);
+            $this->auditar('backup_gerado', $backup['arquivo'], (int) $tenant['id']);
+            $this->session->set_flashdata('success', 'Backup gerado: ' . $backup['arquivo'] . ' (' . plataformaTamanho($backup['tamanho']) . ').');
+        } catch (Throwable $e) {
+            log_message('error', 'plataforma: backup do tenant ' . $tenant['id'] . ': ' . $e->getMessage());
+            $this->session->set_flashdata('error', 'Não foi possível gerar o backup: ' . $e->getMessage());
+        }
+
+        redirect(site_url('empresas/' . $tenant['id']));
+    }
+
+    /**
+     * Exclusão definitiva (LGPD) de uma empresa cancelada. GET mostra a
+     * confirmação; o POST exige digitar o endereço da empresa e a senha de
+     * quem exclui. O backup final é gerado antes; sem ele nada é apagado.
+     */
+    public function excluir($id = null)
+    {
+        $tenant = $this->tenantOu404($id);
+        if ($tenant['status'] !== 'cancelado') {
+            $this->session->set_flashdata('error', 'Só uma empresa cancelada pode ser excluída. Cancele antes.');
+            redirect(site_url('empresas/' . $tenant['id']));
+        }
+
+        $dominio = $this->dominioPrincipal((int) $tenant['id']) ?? (string) $tenant['schema'];
+        $erros = [];
+
+        if ($this->input->method() === 'post') {
+            if (mb_strtolower(trim((string) $this->input->post('confirmacao'))) !== $dominio) {
+                $erros['confirmacao'] = 'Digite exatamente ' . $dominio . ' para confirmar.';
+            }
+            if ($erro = $this->confirmarSenha((string) $this->input->post('senha'))) {
+                $erros['senha'] = $erro;
+            }
+
+            if ($erros === []) {
+                try {
+                    $resultado = $this->tenant_manager->excluirTenant((int) $tenant['id']);
+                    $this->auditar('empresa_excluida', $tenant['nome'] . ' (' . $dominio . '), backup ' . $resultado['backup'], (int) $tenant['id']);
+                    $this->session->set_flashdata('success', $tenant['nome'] . ' foi excluída. O backup final ficou em Backups: ' . $resultado['backup'] . '.');
+
+                    redirect(site_url('empresas'));
+                } catch (Throwable $e) {
+                    log_message('error', 'plataforma: exclusão do tenant ' . $tenant['id'] . ': ' . $e->getMessage());
+                    $erros['_geral'] = 'Não foi possível excluir: ' . $e->getMessage();
+                }
+            }
+        }
+
+        try {
+            $consumo = $this->tenant_manager->consumo((int) $tenant['id']);
+        } catch (Throwable $e) {
+            $consumo = null;
+        }
+
+        $this->tela('plataforma/empresas/excluir', [
+            'tenant' => $tenant,
+            'dominio' => $dominio,
+            'consumo' => $consumo,
+            'erros' => $erros,
+        ], 'Excluir ' . $tenant['nome'], 'empresas');
     }
 
     private function tenantOu404($id): array

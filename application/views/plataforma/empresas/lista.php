@@ -15,6 +15,13 @@ $colunas = [
     ['label' => 'Empresa', 'class' => 'min-w-40', 'render' => fn ($t) => component('link', ['label' => $t['nome'], 'href' => site_url('empresas/' . $t['id']), 'class' => 'font-medium'])],
     ['label' => 'Endereço', 'render' => fn ($t) => (string) ($t['dominio'] ?? '') . ((int) $t['total_dominios'] > 1 ? ' (+' . ((int) $t['total_dominios'] - 1) . ')' : '')],
     ['label' => 'Status', 'nowrap' => true, 'render' => fn ($t) => component('pill-status', plataformaStatusPill((string) $t['status']))],
+    ['label' => 'Plano', 'nowrap' => true, 'hide_until' => 'md', 'render' => function ($t) {
+        $vencimento = plataformaVencimentoPill($t['data_expiracao'] ?? null);
+
+        $plano = (string) ($t['plano'] ?? '—');
+
+        return $vencimento !== null ? [$plano, ' ', component('pill-status', $vencimento)] : $plano;
+    }],
     ['label' => 'Criada em', 'nowrap' => true, 'hide_until' => 'md', 'render' => fn ($t) => date('d/m/Y', strtotime((string) $t['criado_em']))],
     ['label' => 'Ações', 'align' => 'right', 'nowrap' => true, 'render' => fn ($t) => component('button', ['label' => 'Ver ' . $t['nome'], 'icon' => 'eye', 'icon_only' => true, 'variant' => 'ghost', 'size' => 'sm', 'href' => site_url('empresas/' . $t['id'])])],
 ];

@@ -9,6 +9,7 @@
  * @var array<string, string> $valores
  * @var array<string, string> $erros   Por campo; _geral para falha ao criar
  * @var string $dominioBase            SAAS_DOMINIO_BASE ('' = domínio completo)
+ * @var list<array> $planos             Planos ativos
  */
 $erroGeral = $erros['_geral'] ?? null;
 $errosDeCampo = array_diff_key($erros, ['_geral' => true]);
@@ -51,6 +52,20 @@ $grade = 'mt-4 grid gap-4 sm:grid-cols-2';
                         : 'Domínio completo da empresa.',
                     'attrs' => ['maxlength' => 40, 'pattern' => '[a-z0-9]([a-z0-9\-]*[a-z0-9])?', 'autocapitalize' => 'none', 'spellcheck' => 'false', 'data-msg-invalido' => 'Use letras minúsculas, números e hífen (sem começar ou terminar com hífen).'],
                 ])) ?>
+            </div>
+        </section>
+
+        <section class="<?= e($caixa) ?>" aria-labelledby="secao-plano">
+            <h2 id="secao-plano" class="text-heading-sm text-text">Plano</h2>
+            <p class="mt-1 text-caption text-muted">Pode ficar sem plano e ser definido depois, na tela da empresa.</p>
+            <div class="<?= e($grade) ?>">
+                <?php
+                $opcoesPlano = ['' => 'Sem plano'];
+                foreach ($planos as $p) {
+                    $opcoesPlano[(string) $p['id']] = $p['nome'] . ' — ' . Catalogo_planos::precoLegivel($p);
+                }
+                ?>
+                <?= component('select', ['name' => 'plano_id', 'label' => 'Plano', 'options' => $opcoesPlano, 'selected' => (string) ($valores['plano_id'] ?? ''), 'error' => $errosDeCampo['plano_id'] ?? null]) ?>
             </div>
         </section>
 

@@ -9,6 +9,10 @@
  * como na listagem de clientes.
  *
  * @var array        $tenant
+ * @var array|null   $plano     Plano atual da empresa
+ * @var list<array>  $planos    Planos para escolher (ativos e o atual)
+ * @var array|null   $consumo   usuarios, os_mes, armazenamento_mb
+ * @var list<array>  $backups   Backups desta empresa
  * @var list<array>  $dominios
  * @var list<array>  $usuarios
  * @var string|null  $erroUsuarios
@@ -20,6 +24,37 @@ $csrf = '<input type="hidden" name="' . e($this->security->get_csrf_token_name()
 $caixa = 'rounded-xl border border-border bg-surface p-4 sm:p-6';
 $esquema = is_https() ? 'https' : 'http';
 $ativo = $tenant['status'] === 'ativo';
+$cancelado = $tenant['status'] === 'cancelado';
+$vencimento = plataformaVencimentoPill($tenant['data_expiracao'] ?? null);
+
+$opcoesPlano = ['' => 'Sem plano'];
+foreach ($planos as $p) {
+    $opcoesPlano[(string) $p['id']] = $p['nome'] . ' — ' . Catalogo_planos::precoLegivel($p) . ((int) $p['ativo'] === 1 ? '' : ' (desativado)');
+}
+
+$linhasConsumo = [];
+foreach (['usuarios' => ['Usuários ativos', 'limite_usuarios', ''], 'os_mes' => ['OS abertas neste mês', 'limite_os_mes', ''], 'armazenamento_mb' => ['Arquivos enviados', 'limite_armazenamento_mb', ' MB']] as $chave => [$rotulo, $coluna, $sufixo]) {
+    $limite = $plano[$coluna] ?? null;
+    $usado = $consumo[$chave] ?? null;
+    $linhasConsumo[] = [
+        'rotulo' => $rotulo,
+        'usado' => $usado === null ? '—' : number_format((float) $usado, $chave === 'armazenamento_mb' ? 1 : 0, ',', '.') . $sufixo,
+        'limite' => $limite === null ? 'Sem limite' : number_format((int) $limite, 0, ',', '.') . $sufixo,
+        'acima' => $limite !== null && $usado !== null && (float) $usado > (int) $limite,
+    ];
+}
+$colunasConsumo = [
+    ['label' => 'Item', 'render' => fn ($c) => $c['rotulo']],
+    ['label' => 'Em uso', 'nowrap' => true, 'render' => fn ($c) => $c['usado']],
+    ['label' => 'Limite do plano', 'nowrap' => true, 'render' => fn ($c) => $c['limite']],
+    ['label' => 'Situação', 'nowrap' => true, 'render' => fn ($c) => $c['limite'] === 'Sem limite' ? '' : component('pill-status', $c['acima'] ? ['label' => 'Acima do limite', 'variant' => 'danger'] : ['label' => 'Dentro', 'variant' => 'success'])],
+];
+
+$colunasBackups = [
+    ['label' => 'Gerado em', 'nowrap' => true, 'render' => fn ($b) => date('d/m/Y H:i', $b['criado_em'])],
+    ['label' => 'Tamanho', 'nowrap' => true, 'render' => fn ($b) => plataformaTamanho($b['tamanho'])],
+    ['label' => 'Ações', 'align' => 'right', 'nowrap' => true, 'render' => fn ($b) => component('button', ['label' => 'Baixar ' . $b['arquivo'], 'icon' => 'download', 'icon_only' => true, 'variant' => 'ghost', 'size' => 'sm', 'href' => site_url('backups/' . $b['arquivo'])])],
+];
 
 $colunasDominios = [
     ['label' => 'Domínio', 'render' => fn ($d) => $d['verificado_em'] && $ativo
@@ -80,19 +115,55 @@ $colunasAuditoria = [
             <?= component('button', ['label' => 'Voltar', 'variant' => 'ghost', 'href' => site_url('empresas')]) ?>
             <?php if ($ativo) { ?>
                 <?= component('button', ['label' => 'Suspender', 'icon' => 'shield-off', 'variant' => 'outline', 'attrs' => ['data-modal-abrir' => 'suspender-empresa']]) ?>
-            <?php } elseif ($tenant['status'] === 'suspenso') { ?>
+            <?php } else { ?>
                 <form method="post" action="<?= e(site_url('empresas/' . $id . '/status')) ?>">
                     <input type="hidden" name="<?= e($this->security->get_csrf_token_name()) ?>" value="<?= e($this->security->get_csrf_hash()) ?>">
                     <input type="hidden" name="status" value="ativo">
                     <?= component('button', ['label' => 'Reativar', 'icon' => 'shield-check', 'variant' => 'outline', 'type' => 'submit']) ?>
                 </form>
             <?php } ?>
+            <?php if ($cancelado) { ?>
+                <?= component('button', ['label' => 'Excluir definitivamente', 'icon' => 'trash-2', 'variant' => 'outline', 'href' => site_url('empresas/' . $id . '/excluir')]) ?>
+            <?php } else { ?>
+                <?= component('button', ['label' => 'Cancelar empresa', 'icon' => 'archive', 'variant' => 'ghost', 'attrs' => ['data-modal-abrir' => 'cancelar-empresa']]) ?>
+            <?php } ?>
         </div>
     </header>
 
-    <?php if (! $ativo) { ?>
+    <?php if ($cancelado) { ?>
+        <?= component('alert', ['variant' => 'warning', 'message' => 'Empresa cancelada' . (! empty($tenant['cancelado_em']) ? ' em ' . date('d/m/Y', strtotime((string) $tenant['cancelado_em'])) : '') . ': os endereços dela não abrem. Os dados continuam guardados até a exclusão definitiva, que gera um backup final antes de apagar.']) ?>
+    <?php } elseif (! $ativo) { ?>
         <?= component('alert', ['variant' => 'warning', 'message' => 'Empresa sem acesso: os endereços dela respondem "Endereço não encontrado". Os dados continuam guardados.']) ?>
     <?php } ?>
+
+    <section class="<?= e($caixa) ?>" aria-labelledby="secao-plano">
+        <div class="flex flex-wrap items-center gap-2">
+            <h2 id="secao-plano" class="text-heading-sm text-text">Plano</h2>
+            <?php if ($plano !== null) { ?>
+                <?= component('pill-status', ['label' => $plano['nome'], 'variant' => (int) $plano['cortesia'] === 1 ? 'info' : 'neutral']) ?>
+            <?php } ?>
+            <?php if ($vencimento !== null) { ?>
+                <?= component('pill-status', $vencimento) ?>
+            <?php } ?>
+        </div>
+        <p class="mt-1 text-caption text-muted">
+            <?= e($plano !== null ? Catalogo_planos::precoLegivel($plano) . ' · ' . Catalogo_planos::resumoLimites($plano) : 'Sem plano definido.') ?>
+            A cobrança e o bloqueio automático no vencimento entram com a integração de pagamento.
+        </p>
+        <form method="post" action="<?= e(site_url('empresas/' . $id . '/plano')) ?>" novalidate class="mt-4 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_auto]" <?= js_module('formulario/padrao') ?>>
+            <input type="hidden" name="<?= e($this->security->get_csrf_token_name()) ?>" value="<?= e($this->security->get_csrf_hash()) ?>">
+            <?= component('select', ['name' => 'plano_id', 'label' => 'Plano', 'options' => $opcoesPlano, 'selected' => (string) ($tenant['plano_id'] ?? '')]) ?>
+            <?= component('input', ['name' => 'vencimento', 'label' => 'Vencimento', 'type' => 'date', 'value' => $tenant['data_expiracao'] ?? null, 'help' => 'Vazio: sem vencimento.']) ?>
+            <?= component('button', ['label' => 'Salvar plano', 'icon' => 'save', 'variant' => 'outline', 'type' => 'submit']) ?>
+        </form>
+        <div class="mt-4">
+            <?php if ($consumo === null) { ?>
+                <?= component('alert', ['variant' => 'danger', 'message' => 'Não foi possível ler o consumo desta empresa.']) ?>
+            <?php } else { ?>
+                <?= component('data-table', ['columns' => $colunasConsumo, 'rows' => $linhasConsumo, 'caption' => 'Consumo da empresa', 'dense' => true]) ?>
+            <?php } ?>
+        </div>
+    </section>
 
     <section class="<?= e($caixa) ?>" aria-labelledby="secao-dominios">
         <h2 id="secao-dominios" class="text-heading-sm text-text">Domínios</h2>
@@ -115,6 +186,22 @@ $colunasAuditoria = [
             <?php } else { ?>
                 <?= component('data-table', ['columns' => $colunasUsuarios, 'rows' => $usuarios, 'caption' => 'Usuários da empresa', 'dense' => true, 'empty' => 'Nenhum usuário cadastrado.']) ?>
             <?php } ?>
+        </div>
+    </section>
+
+    <section class="<?= e($caixa) ?>" aria-labelledby="secao-backups">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h2 id="secao-backups" class="text-heading-sm text-text">Backups</h2>
+                <p class="mt-1 text-caption text-muted">Banco, arquivos enviados, logo e fotos de perfil num .zip, guardado fora do site.</p>
+            </div>
+            <form method="post" action="<?= e(site_url('empresas/' . $id . '/backup')) ?>" <?= js_module('formulario/padrao') ?>>
+                <input type="hidden" name="<?= e($this->security->get_csrf_token_name()) ?>" value="<?= e($this->security->get_csrf_hash()) ?>">
+                <?= component('button', ['label' => 'Gerar backup', 'icon' => 'archive', 'variant' => 'outline', 'type' => 'submit', 'attrs' => ['data-rotulo-carregando' => 'Gerando…']]) ?>
+            </form>
+        </div>
+        <div class="mt-4">
+            <?= component('data-table', ['columns' => $colunasBackups, 'rows' => $backups, 'caption' => 'Backups da empresa', 'dense' => true, 'empty' => 'Nenhum backup ainda.']) ?>
         </div>
     </section>
 
@@ -141,6 +228,25 @@ $colunasAuditoria = [
         'confirm_label' => 'Suspender',
         'icon' => 'shield-off',
         'confirm_attrs' => ['form' => 'form-suspender-empresa'],
+    ]) ?>
+<?php } ?>
+
+<?php if (! $cancelado) { ?>
+    <form id="form-cancelar-empresa" method="post" action="<?= e(site_url('empresas/' . $id . '/status')) ?>" hidden>
+        <input type="hidden" name="<?= e($this->security->get_csrf_token_name()) ?>" value="<?= e($this->security->get_csrf_hash()) ?>">
+        <input type="hidden" name="status" value="cancelado">
+    </form>
+    <?= component('modal-confirm', [
+        'id' => 'cancelar-empresa',
+        'title' => 'Cancelar empresa?',
+        'message' => [
+            new HtmlSeguro('<strong class="font-semibold text-text">' . e($tenant['nome']) . '</strong>'),
+            ' deixa de acessar o sistema. Os dados ficam guardados; depois de cancelada, a empresa pode ser reativada ou excluída definitivamente.',
+        ],
+        'confirm_label' => 'Cancelar empresa',
+        'cancel_label' => 'Voltar',
+        'icon' => 'archive',
+        'confirm_attrs' => ['form' => 'form-cancelar-empresa'],
     ]) ?>
 <?php } ?>
 

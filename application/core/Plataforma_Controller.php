@@ -47,8 +47,36 @@ abstract class Plataforma_Controller extends CI_Controller
      * Exige sessão de conta da plataforma ativa. A conta é relida a cada
      * requisição: desativada ou com a senha trocada (sessao_versao subiu), a
      * sessão aberta antes deixa de valer.
+     *
+     * O 2FA é obrigatório no painel: a conta que ainda não ativou só alcança a
+     * tela de ativação (Plataforma_conta), que passa $semDoisFatores = true.
      */
-    protected function exigirLogin(): void
+    protected function exigirLogin(bool $semDoisFatores = false): void
+    {
+        $this->exigirSessao();
+
+        if (! $semDoisFatores && ($this->conta->totp_ativado_em ?? null) === null) {
+            redirect(site_url('conta')); // redirect() encerra a requisição
+        }
+    }
+
+    /**
+     * Confere a senha da conta logada antes de uma ação sensível, com o limite
+     * de tentativas (escopo `confirmacao`). Devolve a mensagem de erro, ou null.
+     */
+    protected function confirmarSenha(string $senha): ?string
+    {
+        $this->load->library('Limite_login');
+        $resultado = $this->limite_login->confirmarSenha((string) $this->conta->email, (string) $this->input->ip_address(), $senha, (string) $this->conta->senha);
+
+        return match ($resultado) {
+            Limite_login::SENHA_OK => null,
+            Limite_login::SENHA_BLOQUEADA => Limite_login::MENSAGEM,
+            default => 'A senha não confere.',
+        };
+    }
+
+    private function exigirSessao(): void
     {
         $id = (int) $this->session->userdata('plataforma_id');
         $conta = $id > 0 ? $this->plataforma_contas->porId($id) : null;
@@ -131,6 +159,7 @@ abstract class Plataforma_Controller extends CI_Controller
                 'acao' => $acao,
                 'flash' => $flash,
                 'usuario' => (string) $this->conta->nome,
+                'dois_fatores' => ($this->conta->totp_ativado_em ?? null) !== null,
                 'iniciais' => layoutIniciais((string) $this->conta->nome),
                 'saudacao' => layoutSaudacao((int) date('G')),
             ],

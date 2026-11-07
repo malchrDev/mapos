@@ -59,6 +59,7 @@ class Tools extends CI_Controller
         $result .= "php index.php tools tenants_migrate                Multi-tenancy: migrate every tenant schema.\n";
         $result .= "php index.php tools plataforma_conta \"email\" \"nome\"  Platform panel: create an admin account.\n";
         $result .= "php index.php tools plataforma_senha \"email\"         Platform panel: new password for an account.\n";
+        $result .= "php index.php tools plataforma_2fa \"email\"           Platform panel: reset the 2FA of an account.\n";
 
         echo $result . PHP_EOL;
     }
@@ -214,6 +215,28 @@ class Tools extends CI_Controller
             $senha = $contas->redefinirSenha($email);
             $contas->auditar(null, 'senha_redefinida', 'conta da plataforma ' . $email . ' (CLI)', 'cli');
             echo "Nova senha de {$email}: {$senha}" . PHP_EOL;
+        });
+    }
+
+    /** Apaga o 2FA de uma conta do painel (celular e códigos perdidos). */
+    public function plataforma_2fa($email = null)
+    {
+        if (! $email) {
+            echo 'Uso: php index.php tools plataforma_2fa "email" (@ como %40)' . PHP_EOL;
+
+            return;
+        }
+
+        $this->executarTenant(function (Tenant_manager $tenants) use ($email) {
+            $contas = $this->contasDaPlataforma($tenants);
+            $email = urldecode($email);
+            $conta = $contas->porEmail($email);
+            if ($conta === null) {
+                throw new RuntimeException("Nenhuma conta da plataforma com o e-mail {$email}.");
+            }
+            $contas->redefinirTotp((int) $conta->id);
+            $contas->auditar(null, 'conta_2fa_redefinido', $email . ' (CLI)', 'cli');
+            echo "2FA de {$email} apagado. No próximo login a conta cadastra o aplicativo de novo." . PHP_EOL;
         });
     }
 

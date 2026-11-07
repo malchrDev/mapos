@@ -45,9 +45,10 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
 1. ~~Uploads por tenant~~ feito em 2026-11-07 (`STORAGE_PATH/<schema>/`).
 2. ~~JWT da API vinculado ao tenant~~ feito em 2026-11-07 (chave derivada por schema + claim `ten`).
 3. Tarefas agendadas (cron do Map-OS, e-mails) rodando para cada tenant.
-4. Painel da plataforma, próximos passos: 2FA para as contas do painel, telas
-   para gerenciar as próprias contas (hoje só pelo CLI), cancelar/excluir
-   empresa com backup (Fase 6), planos e cobrança (Fase 5).
+4. ~~Painel da plataforma~~ feito em 2026-11-07: 2FA obrigatório, contas do
+   painel, minha conta, planos e vencimento, backup, cancelar e excluir
+   empresa. Fica para a Fase 5: cobrança (gateway a escolher) e bloqueio
+   automático por vencimento e por limite do plano.
 5. PR da branch.
 
 ## Feito em 2026-11-07 (noite)

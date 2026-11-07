@@ -12,16 +12,23 @@
  * dentro do shell).
  *
  * @var string $view
- * @var array{titulo: string, menu: string, acao: ?array, flash: list<array>, usuario: string, iniciais: string, saudacao: string} $plataforma
+ * @var array{titulo: string, menu: string, acao: ?array, flash: list<array>, usuario: string, dois_fatores: bool, iniciais: string, saudacao: string} $plataforma
  */
 $foco = 'focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring';
 $ativo = 'aria-[current=page]:bg-primary-tint aria-[current=page]:font-semibold aria-[current=page]:text-text'
     . ' aria-[current=page]:before:absolute aria-[current=page]:before:inset-y-2 aria-[current=page]:before:-left-3 aria-[current=page]:before:w-[3px] aria-[current=page]:before:rounded-r-[3px] aria-[current=page]:before:bg-primary';
 $classeLink = 'relative flex h-10 items-center gap-3 rounded-md px-2.5 text-[0.9375rem] font-medium text-muted transition-colors hover:bg-surface-subtle hover:text-text ' . $foco . ' ' . $ativo;
 
-$menu = [
+// Sem 2FA ativo a conta só alcança Minha conta (exigirLogin()); o menu mostra só ela.
+$menu = $plataforma['dois_fatores'] ? [
     'empresas' => ['label' => 'Empresas', 'icon' => 'house', 'url' => 'empresas'],
+    'planos' => ['label' => 'Planos', 'icon' => 'banknote', 'url' => 'planos'],
+    'backups' => ['label' => 'Backups', 'icon' => 'archive', 'url' => 'backups'],
+    'contas' => ['label' => 'Contas do painel', 'icon' => 'users', 'url' => 'contas'],
     'auditoria' => ['label' => 'Auditoria', 'icon' => 'history', 'url' => 'auditoria'],
+    'conta' => ['label' => 'Minha conta', 'icon' => 'circle-user', 'url' => 'conta'],
+] : [
+    'conta' => ['label' => 'Minha conta', 'icon' => 'circle-user', 'url' => 'conta'],
 ];
 $assets = layoutAssets();
 $versao = (string) config_item('app_version');
@@ -56,7 +63,7 @@ $versao = (string) config_item('app_version');
 
     <aside id="v5-sidebar" class="v5-sidebar fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-surface" data-sidebar aria-label="Menu principal">
       <div class="v5-sidebar-topo flex h-topbar shrink-0 items-center gap-3 border-b border-border px-4">
-        <a href="<?= e(site_url('empresas')) ?>" class="flex min-w-0 items-center gap-2.5 rounded-md <?= e($foco) ?>" title="Empresas">
+        <a href="<?= e(site_url($plataforma['dois_fatores'] ? 'empresas' : 'conta')) ?>" class="flex min-w-0 items-center gap-2.5 rounded-md <?= e($foco) ?>" title="Início">
           <span class="inline-flex size-[34px] shrink-0 items-center justify-center rounded-md bg-primary text-on-primary"><?= icon('wrench', ['class' => 'size-5']) ?></span>
           <span class="v5-rotulo flex min-w-0 items-center gap-2">
             <span class="truncate font-display text-[1.3125rem] leading-none font-bold tracking-[-0.2px] text-text">Plataforma</span>
