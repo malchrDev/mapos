@@ -250,6 +250,28 @@ pelo banco dela. O backup e a exclusão de uma empresa levam os dela, achados po
 **Ao converter uma instalação única em tenant**, mova o conteúdo de
 `STORAGE_PATH` para `STORAGE_PATH/<schema>/`, mantendo as subpastas.
 
+## Configurações por empresa
+
+Na instalação única, a tela Configurações grava parte dos campos no
+`application/.env`. Numa empresa do SaaS o `.env` é da plataforma, então:
+
+| Campos | Numa empresa |
+| --- | --- |
+| Gateways de pagamento (Efí, Mercado Pago, Asaas) | **Da empresa**, no banco dela; credenciais **nunca herdam** as da plataforma (as cobranças cairiam na conta de outro) |
+| Imprimir anexos, API ligada, validade do token | Da empresa; até ela mudar, vale o padrão do `.env` |
+| SMTP (aba E-mail) e "gerar chave nova para os tokens" | Só da plataforma: a aba e o campo somem |
+| Atualizar o Map-OS pelo GitHub | 404: o código é um só, quem atualiza é o deploy da plataforma |
+
+O que a empresa grava vai numa linha de `configuracoes` (`config =
+tenant_env`), um JSON com as chaves de `TENANT_ENV_CHAVES`
+(`helpers/tenant_helper.php`). Segredos vão cifrados (AES-256-GCM, chave
+derivada do `APP_ENCRYPTION_KEY`) e nunca voltam para a tela. O hook
+(`tenantCarregarEnv`) lê essa linha a cada requisição da empresa, apaga do
+`$_ENV` as credenciais de pagamento herdadas e aplica só as chaves da lista. Uma
+chave fora da lista no JSON é ignorada: a empresa não troca banco, SMTP nem
+chaves da plataforma. **Não troque o `APP_ENCRYPTION_KEY`** com empresas
+configuradas: os segredos delas deixam de abrir e ficam vazios (aviso no log).
+
 ## Tarefas agendadas por empresa
 
 A fila de e-mails (`email_queue`) fica no banco de cada empresa. Na linha de

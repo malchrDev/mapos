@@ -4,6 +4,8 @@ if (! defined('BASEPATH')) {
     exit('No direct script access allowed');
 }
 
+require_once __DIR__ . '/../helpers/tenant_helper.php';
+
 /**
  * Resolve o tenant pelo hostname e aponta o schema da conexão (Fase 1).
  *
@@ -51,6 +53,7 @@ function resolverTenant()
             $GLOBALS['mapos_contexto'] = 'tenant';
             // Uploads em STORAGE_PATH/<schema>/ (armazenamentoTenant()).
             $GLOBALS['mapos_tenant_schema'] = $resultado['schema'];
+            tenantCarregarEnv($resultado['schema']);
 
             return;
 
@@ -107,6 +110,30 @@ function tenantResolverCli(): void
     tenantApontarBanco($schema, (string) $resultado['dominio'], tenantBaseUrlCli((string) $resultado['dominio']));
     $GLOBALS['mapos_contexto'] = 'tenant';
     $GLOBALS['mapos_tenant_schema'] = $schema;
+    tenantCarregarEnv($schema);
+}
+
+/**
+ * Configuração própria da empresa (gateways de pagamento, API, impressão)
+ * no $_ENV desta requisição: tenantEnvAplicar(). Sem a linha, ou com o banco
+ * da empresa sem responder, as credenciais de pagamento ficam vazias, nunca as
+ * da plataforma.
+ */
+function tenantCarregarEnv(string $schema): void
+{
+    $json = null;
+    try {
+        $dsn = 'mysql:host=' . ($_ENV['DB_HOSTNAME'] ?? 'localhost') . ';port=' . (int) ($_ENV['DB_PORT'] ?? 3306) . ';dbname=' . $schema . ';charset=utf8mb4';
+        $pdo = new PDO($dsn, $_ENV['DB_USERNAME'] ?? '', $_ENV['DB_PASSWORD'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 3]);
+        $stmt = $pdo->prepare('SELECT `valor` FROM `configuracoes` WHERE `config` = ? LIMIT 1');
+        $stmt->execute(['tenant_env']);
+        $valor = $stmt->fetchColumn();
+        $json = $valor === false ? null : (string) $valor;
+    } catch (Throwable $erro) {
+        error_log('tenant: configuração da empresa ' . $schema . ' não carregou: ' . $erro->getMessage());
+    }
+
+    tenantEnvAplicar($json);
 }
 
 /**

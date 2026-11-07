@@ -9,6 +9,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Security (2026-11-07, configurações por empresa)
+- Numa empresa, Configurações gravava no `.env` compartilhado: o admin de qualquer loja trocava o SMTP, **as credenciais dos gateways de pagamento de todas as lojas**, ligava/desligava a API e gerava a chave dos tokens da plataforma, além de atualizar o código pelo GitHub. Agora gateways, API e impressão são da empresa (`configuracoes.tenant_env`, segredos cifrados), credenciais de pagamento nunca herdam as da plataforma, SMTP e chave dos tokens somem da tela e a atualização do código dá 404 numa empresa.
+
 ### Added (2026-11-07, tarefas por empresa)
 - `tools tenants_tarefa email process|retry`: roda a fila de e-mails de cada empresa ativa, cada uma num processo próprio, com trava contra execuções sobrepostas e limite de tempo. Antes, as filas das empresas nunca eram enviadas (o cron só via o banco padrão).
 - Hook na linha de comando: `MAPOS_TENANT_SCHEMA` aponta o processo para uma empresa ativa; outra coisa encerra com código 3.

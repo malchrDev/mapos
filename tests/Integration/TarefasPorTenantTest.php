@@ -72,6 +72,31 @@ final class TarefasPorTenantTest extends TestCase
         }
     }
 
+    public function testHookCarregaAConfiguracaoDoBancoDaEmpresa(): void
+    {
+        $anterior = $_ENV;
+        $_ENV['APP_ENCRYPTION_KEY'] = 'chave-de-teste-da-instalacao-com-32-caracteres';
+        $_ENV['PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY'] = 'chave-da-plataforma';
+
+        try {
+            $loja = $this->tenants->provisionar(['dominio' => 'env1.teste.local', 'nome' => 'Env 1', 'admin_email' => 'admin@env1.teste.local']);
+            $outra = $this->tenants->provisionar(['dominio' => 'env2.teste.local', 'nome' => 'Env 2', 'admin_email' => 'admin@env2.teste.local']);
+
+            $banco = DB(integracaoConfigBanco($loja['schema']));
+            $banco->insert('configuracoes', ['config' => 'tenant_env', 'valor' => tenantEnvMesclar(null, ['PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY' => 'chave-da-loja'], ['PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY'])]);
+            $banco->close();
+
+            tenantCarregarEnv($loja['schema']);
+            $this->assertSame('chave-da-loja', $_ENV['PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY']);
+
+            $_ENV['PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY'] = 'chave-da-plataforma';
+            tenantCarregarEnv($outra['schema']);
+            $this->assertArrayNotHasKey('PAYMENT_GATEWAYS_ASAAS_CREDENTIAIS_API_KEY', $_ENV, 'Empresa sem configuração não herda a da plataforma nem a de outra.');
+        } finally {
+            $_ENV = $anterior;
+        }
+    }
+
     public function testBaseUrlDaCliUsaODominioDaEmpresa(): void
     {
         $anterior = $_ENV['APP_BASEURL'] ?? null;

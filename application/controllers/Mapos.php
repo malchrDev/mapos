@@ -806,13 +806,17 @@ class Mapos extends MY_Controller
         }
 
         $this->load->helper(['configuracoes', 'os']);
-        $aba = listagemFiltros(['aba' => array_keys(CONFIG_ABAS)], $this->input->get())['aba'] ?? 'geral';
+        $aba = listagemFiltros(['aba' => array_keys(configuracaoAbas())], $this->input->get())['aba'] ?? 'geral';
         $erros = [];
 
         if ($this->input->method() === 'post' && $aba !== 'sistema') {
             [$config, $env, $erros] = configuracaoDadosDoFormulario($aba, $this->input->post());
 
-            if ($erros === [] && $env !== [] && !$this->gravarEnv($env)) {
+            // Numa empresa do SaaS o .env é da plataforma: o que a empresa
+            // configura vai para o banco dela (tenant_helper.php).
+            if ($erros === [] && $env !== [] && configuracaoNaEmpresa()) {
+                $config['tenant_env'] = $this->envDaEmpresa($aba, $env);
+            } elseif ($erros === [] && $env !== [] && !$this->gravarEnv($env)) {
                 $erros['_geral'] = 'Não foi possível gravar o arquivo application/.env. Confira a permissão de escrita.';
             }
 
@@ -836,6 +840,18 @@ class Mapos extends MY_Controller
         $this->data['view'] = 'mapos/configurar';
 
         return $this->layout();
+    }
+
+    /**
+     * JSON de configuracoes.tenant_env com os valores salvos agora (empresa do
+     * SaaS); segredos cifrados com o APP_ENCRYPTION_KEY.
+     */
+    private function envDaEmpresa(string $aba, array $env): string
+    {
+        $segredos = array_keys(array_filter(configuracaoCampos($aba), static fn ($c) => $c['tipo'] === 'segredo'));
+        $atual = $this->db->select('valor')->where('config', 'tenant_env')->get('configuracoes')->row();
+
+        return tenantEnvMesclar($atual->valor ?? null, $env, $segredos);
     }
 
     /** Grava as chaves no application/.env (configuracaoEnvAtualizado()). */
@@ -890,6 +906,13 @@ class Mapos extends MY_Controller
      */
     public function atualizacao()
     {
+        // O código é um só para todas as empresas do SaaS: quem atualiza é a
+        // plataforma (deploy), nunca o admin de uma empresa.
+        $this->load->helper('configuracoes');
+        if (configuracaoNaEmpresa()) {
+            show_404();
+        }
+
         if (! $this->permission->checkPermission($this->session->userdata('permissao'), 'cSistema')) {
             $this->session->set_flashdata('error', 'Você não tem permissão para configurar o sistema');
 
@@ -924,6 +947,13 @@ class Mapos extends MY_Controller
      */
     public function atualizarMapos()
     {
+        // O código é um só para todas as empresas do SaaS: quem atualiza é a
+        // plataforma (deploy), nunca o admin de uma empresa.
+        $this->load->helper('configuracoes');
+        if (configuracaoNaEmpresa()) {
+            show_404();
+        }
+
         if (! $this->permission->checkPermission($this->session->userdata('permissao'), 'cSistema')) {
             $this->session->set_flashdata('error', 'Você não tem permissão para configurar o sistema');
 
