@@ -42,28 +42,20 @@ function resolverTenant()
             return;
 
         case 'tenant':
-            $schema = $resultado['schema'];
-            $_ENV['DB_DATABASE'] = $schema;
-            $_SERVER['DB_DATABASE'] = $schema;
-            putenv('DB_DATABASE=' . $schema);
-
-            // Um tenant atende por vários hostnames: os links precisam sair no
-            // hostname pedido, não no APP_BASEURL fixo. O Host já foi conferido
-            // contra tenant_dominios, então não é cabeçalho arbitrário.
-            // config.php já foi lido (a classe Hooks carrega o Config antes do
-            // pre_system), por isso o valor vai direto no objeto de config.
-            $baseUrl = tenantBaseUrl($host);
-            $_ENV['APP_BASEURL'] = $baseUrl;
-            load_class('Config', 'core')->set_item('base_url', $baseUrl);
+            tenantApontarBanco($resultado['schema'], $host);
+            $GLOBALS['mapos_contexto'] = 'tenant';
 
             return;
 
         case 'painel':
-            // O painel administrativo da plataforma ainda não existe (próxima
-            // etapa); o hostname já fica reservado e nunca serve um tenant.
-            tenantResponder(503, 'Painel administrativo', 'O painel administrativo da plataforma ainda não está disponível.');
+            // Painel administrativo da plataforma: trabalha no banco mestre, e
+            // config/routes.php só deixa chegar aos controllers de
+            // controllers/plataforma/ (nenhuma tela de tenant abre aqui).
+            tenantApontarBanco(trim((string) $_ENV['DB_MASTER_DATABASE']), $host);
+            $GLOBALS['mapos_contexto'] = 'plataforma';
 
-            // no break
+            return;
+
         case 'indisponivel':
             tenantResponder(503, 'Serviço indisponível', 'Não foi possível acessar o sistema agora. Tente novamente em alguns minutos.');
 
@@ -71,6 +63,26 @@ function resolverTenant()
         default:
             tenantResponder(404, 'Endereço não encontrado', 'Nenhuma conta ativa responde por este endereço.');
     }
+}
+
+/**
+ * Aponta a conexão `default` para o banco e o base_url para o Host pedido.
+ *
+ * Um tenant atende por vários hostnames: os links precisam sair no hostname
+ * pedido, não no APP_BASEURL fixo. O Host já foi conferido (tenant_dominios ou
+ * SAAS_PAINEL_HOST), então não é cabeçalho arbitrário. config.php já foi lido
+ * (a classe Hooks carrega o Config antes do pre_system), por isso o base_url
+ * vai direto no objeto de config.
+ */
+function tenantApontarBanco(string $banco, string $host): void
+{
+    $_ENV['DB_DATABASE'] = $banco;
+    $_SERVER['DB_DATABASE'] = $banco;
+    putenv('DB_DATABASE=' . $banco);
+
+    $baseUrl = tenantBaseUrl($host);
+    $_ENV['APP_BASEURL'] = $baseUrl;
+    load_class('Config', 'core')->set_item('base_url', $baseUrl);
 }
 
 /**

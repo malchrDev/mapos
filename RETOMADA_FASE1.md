@@ -33,8 +33,7 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
 3. `DB_MASTER_DATABASE` vazio desliga tudo: instalação única continua igual.
 4. Tenant acessa por **subdomínio da plataforma e por domínio próprio** (ambos);
    domínio próprio só resolve com TXT de verificação.
-5. **Painel administrativo da plataforma em subdomínio separado**
-   (`SAAS_PAINEL_HOST`, hoje responde 503).
+5. **Painel administrativo da plataforma em subdomínio separado** (`SAAS_PAINEL_HOST`), no banco mestre, com contas próprias e auditoria.
 6. Admin do tenant recebe acesso no **e-mail do pedido de inscrição**, depois da
    confirmação do pagamento — ou na hora, se o plano for **CORTESIA**. Até a
    Fase 5, a senha inicial aleatória sai no CLI.
@@ -45,7 +44,18 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
 
 1. **Uploads por tenant**: `STORAGE_PATH/<schema>/`.
 2. **JWT da API vinculado ao tenant** (claim com o schema, recusado em outro Host).
-3. **Painel administrativo** no `SAAS_PAINEL_HOST`: listar/criar/suspender
-   tenants, domínios (pode começar mínimo; cresce com a Fase 5).
-4. Tarefas agendadas (cron do Map-OS, e-mails) rodando para cada tenant.
+3. Tarefas agendadas (cron do Map-OS, e-mails) rodando para cada tenant.
+4. Painel da plataforma, próximos passos: 2FA para as contas do painel, telas
+   para gerenciar as próprias contas (hoje só pelo CLI), cancelar/excluir
+   empresa com backup (Fase 6), planos e cobrança (Fase 5).
 5. PR da branch.
+
+## Feito em 2026-11-07 (noite)
+
+- Painel da plataforma em `SAAS_PAINEL_HOST` (ver docs/multi-tenancy.md).
+- Provisionamento carrega o `banco.sql` como o instalador, em vez de rodar as
+  migrations desde 2012: o banco de cada empresa sai idêntico ao de uma
+  instalação nova. Antes, `cobrancas.charge_id` saía `int` (gateways quebrariam)
+  e outras 10 colunas divergiam.
+- `application/.env.example` voltou a ser lido pelo parser de INI (o comentário
+  da Fase 1 tinha parênteses e quebrava o `CookieSeguroTest`).

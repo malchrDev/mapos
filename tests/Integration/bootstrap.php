@@ -98,15 +98,6 @@ final class IntegracaoLoader
     }
 }
 
-/** Conteúdo de application/config/tenant_dados_iniciais.php. */
-function integracaoDadosIniciais(): array
-{
-    $config = [];
-    require APPPATH . 'config/tenant_dados_iniciais.php';
-
-    return $config['tenant_dados_iniciais'];
-}
-
 /** Grupo `default` como o config/database.php monta, para o banco informado. */
 function integracaoConfigBanco(string $banco): array
 {

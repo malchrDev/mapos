@@ -247,6 +247,144 @@ class Tenant_manager
         return $this->mestre()->order_by('id')->get('tenants')->result_array();
     }
 
+    /** Status que um tenant pode ter. */
+    const STATUS = ['ativo', 'suspenso', 'cancelado'];
+
+    /**
+     * Tenants com o domínio de plataforma e a contagem de domínios, para a
+     * listagem do painel. Busca por nome, documento ou qualquer domínio.
+     *
+     * @return list<array>
+     */
+    public function listarParaPainel(string $busca = '', ?string $status = null): array
+    {
+        $mestre = $this->mestre();
+        $mestre->select('t.id, t.nome, t.documento, t.status, t.criado_em, t.data_expiracao,'
+            . " MAX(CASE WHEN d.tipo = 'plataforma' THEN d.dominio END) AS dominio,"
+            . ' COUNT(d.id) AS total_dominios', false)
+            ->from('tenants t')
+            ->join('tenant_dominios d', 'd.tenant_id = t.id', 'left')
+            ->group_by('t.id')
+            ->order_by('t.id', 'DESC');
+
+        if ($status !== null && in_array($status, self::STATUS, true)) {
+            $mestre->where('t.status', $status);
+        }
+
+        $busca = trim($busca);
+        if ($busca !== '') {
+            $mestre->group_start()
+                ->like('t.nome', $busca)
+                ->or_like('t.documento', $busca)
+                ->or_where('t.id IN (SELECT tenant_id FROM tenant_dominios WHERE dominio LIKE ' . $mestre->escape('%' . $mestre->escape_like_str($busca) . '%') . " ESCAPE '!')", null, false)
+                ->group_end();
+        }
+
+        return $mestre->get()->result_array();
+    }
+
+    /**
+     * Um tenant pelo id (qualquer status), ou null.
+     */
+    public function buscarPorId(int $id): ?array
+    {
+        $registro = $this->mestre()->where('id', $id)->get('tenants')->row_array();
+
+        return $registro ?: null;
+    }
+
+    /**
+     * Muda o status do tenant. Suspenso e cancelado deixam de resolver no hook
+     * na próxima requisição; o schema e os dados ficam intactos.
+     */
+    public function alterarStatus(int $id, string $status): void
+    {
+        if (! in_array($status, self::STATUS, true)) {
+            throw new InvalidArgumentException("Status inválido: {$status}.");
+        }
+        if ($this->buscarPorId($id) === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+
+        $this->mestre()->where('id', $id)->update('tenants', ['status' => $status, 'atualizado_em' => date('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * Usuários do painel do tenant (do schema dele), sem senha nem segredos.
+     *
+     * @return list<array{idUsuarios:int, nome:string, email:string, situacao:int, perfil:?string}>
+     */
+    public function usuariosDoTenant(int $id): array
+    {
+        $tenant = $this->buscarPorId($id);
+        if ($tenant === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+
+        $db = $this->conexao($tenant['schema']);
+        try {
+            $linhas = $db->select('u.idUsuarios, u.nome, u.email, u.situacao, p.nome AS perfil')
+                ->from('usuarios u')
+                ->join('permissoes p', 'p.idPermissao = u.permissoes_id', 'left')
+                ->order_by('u.idUsuarios')
+                ->get()
+                ->result_array();
+        } finally {
+            $db->close();
+        }
+
+        return array_map(static fn ($l) => [
+            'idUsuarios' => (int) $l['idUsuarios'],
+            'nome' => (string) $l['nome'],
+            'email' => (string) $l['email'],
+            'situacao' => (int) $l['situacao'],
+            'perfil' => $l['perfil'] !== null ? (string) $l['perfil'] : null,
+        ], $linhas);
+    }
+
+    /**
+     * Senha nova e aleatória para um usuário do tenant; devolve a senha. As
+     * sessões e os tokens da API abertos por ele deixam de valer.
+     */
+    public function redefinirSenhaUsuario(int $id, int $idUsuario): string
+    {
+        $tenant = $this->buscarPorId($id);
+        if ($tenant === null) {
+            throw new RuntimeException("Tenant {$id} não existe.");
+        }
+
+        $senha = self::gerarSenha();
+        $db = $this->conexao($tenant['schema']);
+        try {
+            if (! $db->where('idUsuarios', $idUsuario)->count_all_results('usuarios')) {
+                throw new RuntimeException('Usuário não encontrado neste tenant.');
+            }
+
+            $db->set('senha', password_hash($senha, PASSWORD_DEFAULT));
+            foreach (['sessao_versao', 'token_versao'] as $versao) {
+                if ($db->field_exists($versao, 'usuarios')) {
+                    $db->set($versao, $versao . ' + 1', false);
+                }
+            }
+            if (! $db->where('idUsuarios', $idUsuario)->update('usuarios')) {
+                throw new RuntimeException('Não foi possível trocar a senha: ' . ($db->error()['message'] ?? ''));
+            }
+        } finally {
+            $db->close();
+        }
+
+        return $senha;
+    }
+
+    /**
+     * Conexão com o banco mestre (CLI e painel usam para as contas da
+     * plataforma).
+     */
+    public function conexaoMestre()
+    {
+        return $this->mestre();
+    }
+
     /**
      * Verifica se um schema já existe no cluster.
      */
@@ -398,12 +536,13 @@ class Tenant_manager
         $this->criarSchema($schema);
 
         try {
-            $this->migrarSchema($schema);
-            $this->gravarDadosIniciais($schema, [
+            // Igual ao instalador: banco.sql e depois as migrations posteriores a ele.
+            $this->carregarBancoSql($schema, [
                 'nome' => trim((string) ($dados['admin_nome'] ?? '')) ?: 'Administrador',
                 'email' => $email,
                 'senha' => $senha,
             ]);
+            $this->migrarSchema($schema);
 
             $agora = date('Y-m-d H:i:s');
             $mestre = $this->mestre();
@@ -454,49 +593,83 @@ class Tenant_manager
     }
 
     /**
-     * O que uma instalação nova ganha do instalador (banco.sql) e as migrations
-     * não criam: configurações padrão, o perfil Administrador e o usuário admin.
+     * Carrega o banco.sql no schema novo, do mesmo jeito que o instalador
+     * (install/do_install.php): esquema da 4.x, configurações padrão, perfil
+     * Administrador e o admin, com os marcadores trocados por
+     * instaladorMontarSql(). Depois disso, migrarSchema() aplica só as
+     * migrations posteriores à versão que o banco.sql grava.
+     *
+     * Rodar todas as migrations a partir do zero NÃO dá o mesmo esquema: o
+     * histórico antigo do Map-OS diverge do banco.sql (ex.: cobrancas.charge_id
+     * vira int, e os gateways gravam texto ali). O tenant tem de nascer igual a
+     * uma instalação nova, que é o esquema que o resto do sistema espera.
      *
      * @param  array{nome:string, email:string, senha:string}  $admin
      */
-    protected function gravarDadosIniciais(string $schema, array $admin): void
+    protected function carregarBancoSql(string $schema, array $admin): void
     {
-        $this->CI->config->load('tenant_dados_iniciais', false, false);
-        $dados = $this->CI->config->item('tenant_dados_iniciais');
+        require_once __DIR__ . '/../../install/instalador.php';
+
+        $arquivo = __DIR__ . '/../../banco.sql';
+        $sql = is_file($arquivo) ? (string) file_get_contents($arquivo) : '';
+        if ($sql === '') {
+            throw new RuntimeException('banco.sql não encontrado na raiz do sistema.');
+        }
+
         $db = $this->conexao($schema);
-
         try {
-            // INSERT IGNORE: algumas migrations já gravam a própria configuração.
-            foreach ($dados['configuracoes'] as $config => $valor) {
-                $this->executar($db, 'INSERT IGNORE INTO configuracoes (config, valor) VALUES (?, ?)', [$config, $valor]);
+            $mysqli = $db->conn_id;
+            if (! $mysqli instanceof mysqli) {
+                throw new RuntimeException('O provisionamento de tenants exige o driver mysqli (DB_DRIVER=mysqli).');
             }
 
-            if (! $db->insert('permissoes', [
-                'nome' => 'Administrador',
-                'permissoes' => serialize($dados['permissoes_admin']),
-                'situacao' => 1,
-                'data' => date('Y-m-d'),
-            ])) {
-                throw new RuntimeException('Não foi possível criar o perfil Administrador: ' . ($db->error()['message'] ?? ''));
-            }
-            $perfil = (int) $db->insert_id();
-
-            if (! $db->insert('usuarios', [
-                'nome' => $admin['nome'],
-                'cpf' => '',
-                'cep' => '',
+            $sql = instaladorMontarSql($sql, [
+                'full_name' => $admin['nome'],
                 'email' => $admin['email'],
-                'senha' => password_hash($admin['senha'], PASSWORD_DEFAULT),
-                'telefone' => '',
-                'situacao' => 1,
-                'dataCadastro' => date('Y-m-d'),
-                'permissoes_id' => $perfil,
+                'password' => $admin['senha'],
+            ], date('Y-m-d H:i:s'), static fn (string $valor): string => $mysqli->real_escape_string($valor));
+
+            $this->executarScript($mysqli, $sql);
+
+            // O admin do banco.sql traz documento e endereço de exemplo; num
+            // tenant eles seriam dados falsos da empresa.
+            $db->where('email', $admin['email'])->update('usuarios', [
+                'rg' => null, 'cpf' => '', 'cep' => '', 'rua' => null, 'numero' => null,
+                'bairro' => null, 'cidade' => null, 'estado' => null, 'telefone' => '',
                 'dataExpiracao' => null,
-            ])) {
-                throw new RuntimeException('Não foi possível criar o usuário administrador: ' . ($db->error()['message'] ?? ''));
-            }
+            ]);
         } finally {
             $db->close();
+        }
+    }
+
+    /**
+     * multi_query que não engole erro: lê todos os resultados e para no
+     * primeiro statement que falhou (o instalador só descarta os resultados).
+     */
+    private function executarScript(mysqli $mysqli, string $sql): void
+    {
+        $falha = static fn () => new RuntimeException('Erro ao carregar o banco.sql: ' . $mysqli->error);
+
+        try {
+            if (! $mysqli->multi_query($sql)) {
+                throw $falha();
+            }
+            while (true) {
+                $resultado = $mysqli->store_result();
+                if ($resultado instanceof mysqli_result) {
+                    $resultado->free();
+                }
+                if (! $mysqli->more_results()) {
+                    break;
+                }
+                // next_result() devolve false quando o próximo statement falhou.
+                if (! $mysqli->next_result()) {
+                    throw $falha();
+                }
+            }
+        } catch (mysqli_sql_exception $e) {
+            throw new RuntimeException('Erro ao carregar o banco.sql: ' . $e->getMessage(), 0, $e);
         }
     }
 

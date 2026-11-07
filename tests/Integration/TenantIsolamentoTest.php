@@ -139,11 +139,63 @@ final class TenantIsolamentoTest extends TestCase
         $this->assertTrue(password_verify($novo['admin_senha'], $usuario['senha']));
         $this->assertSame('1', (string) $usuario['situacao']);
         $this->assertSame('Administrador', $perfil['nome']);
-        // Mesmas permissões do Administrador de uma instalação nova.
-        $esperado = integracaoDadosIniciais()['permissoes_admin'];
-        $this->assertSame($esperado, unserialize($perfil['permissoes']));
+        // Mesmas permissões do Administrador de uma instalação nova (banco.sql).
+        preg_match("/INSERT IGNORE INTO `permissoes`.*?VALUES\\s*\\(1, 'Administrador', '(.*?)', 1/s", (string) file_get_contents(MAPOS_ROOT . '/banco.sql'), $banco);
+        $this->assertSame(unserialize($banco[1]), unserialize($perfil['permissoes']));
         $this->assertSame('Map-OS', $configs['app_name']);
         $this->assertArrayHasKey('os_status_list', $configs);
+        // O banco.sql traz documento e endereço de exemplo para o admin; no tenant eles saem.
+        $this->assertSame('', $usuario['cpf']);
+        $this->assertNull($usuario['rua']);
+    }
+
+    /**
+     * O instalador só descarta os resultados do multi_query; o provisionamento
+     * não pode seguir com um banco.sql que falhou no meio.
+     */
+    public function testScriptComErroNoMeioFalha(): void
+    {
+        $db = $this->conexao($_ENV['DB_MASTER_DATABASE']);
+        $executar = new ReflectionMethod(Tenant_manager::class, 'executarScript');
+
+        try {
+            $executar->invoke($this->tenants, $db->conn_id, 'SELECT 1; SELEC quebrado; SELECT 2;');
+            $this->fail('O statement inválido deveria interromper o script.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Erro ao carregar o banco.sql', $e->getMessage());
+        } finally {
+            $db->close();
+        }
+
+        // E um script válido inteiro passa.
+        $db = $this->conexao($_ENV['DB_MASTER_DATABASE']);
+        $executar->invoke($this->tenants, $db->conn_id, 'SELECT 1; SELECT 2; SET @x = 3;');
+        $this->assertSame('3', (string) $db->query('SELECT @x AS x')->row()->x);
+        $db->close();
+    }
+
+    /**
+     * O tenant nasce igual a uma instalação nova (banco.sql + migrations
+     * posteriores), não do histórico de migrations desde 2012 — que diverge do
+     * banco.sql. Estas colunas são as que divergiam.
+     */
+    public function testEsquemaDoTenantEOMesmoDeUmaInstalacaoNova(): void
+    {
+        $schema = $this->provisionar('esquema.teste.local')['schema'];
+
+        $db = $this->conexao($schema);
+        $tipos = [];
+        foreach ($db->query('SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ?', [$schema])->result_array() as $coluna) {
+            $tipos[$coluna['TABLE_NAME'] . '.' . $coluna['COLUMN_NAME']] = $coluna['COLUMN_TYPE'] . ($coluna['IS_NULLABLE'] === 'YES' ? ' null' : '');
+        }
+        $db->close();
+
+        // Os gateways gravam o id da cobrança em texto.
+        $this->assertSame('varchar(255) null', $tipos['cobrancas.charge_id']);
+        $this->assertSame('varchar(15) null', $tipos['cobrancas.total']);
+        $this->assertSame('int null', $tipos['vendas.garantia']);
+        $this->assertSame('int', $tipos['lancamentos.usuarios_id']);
+        $this->assertSame('varchar(255) null', $tipos['clientes.asaas_id']);
     }
 
     public function testSenhaDoAdminEDiferenteACadaTenant(): void

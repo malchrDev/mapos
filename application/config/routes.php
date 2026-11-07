@@ -50,5 +50,12 @@ if (filter_var($_ENV['API_ENABLED'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
     require APPPATH . 'config/routes_api.php';
 }
 
+// Painel administrativo da plataforma (multi-tenancy, hostname
+// SAAS_PAINEL_HOST): troca a tabela inteira pelas rotas dele. Ver
+// docs/multi-tenancy.md.
+if (($GLOBALS['mapos_contexto'] ?? '') === 'plataforma') {
+    require APPPATH . 'config/routes_plataforma.php';
+}
+
 /* End of file routes.php */
 /* Location: ./application/config/routes.php */

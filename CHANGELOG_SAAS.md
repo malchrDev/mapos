@@ -9,9 +9,18 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07 — noite)
+- Painel administrativo da plataforma em `SAAS_PAINEL_HOST`: login com `Limite_login` (escopo `plataforma`), empresas (listar, buscar, criar, suspender, reativar), domínios próprios com verificação, nova senha para usuário de empresa e trilha de auditoria. Rotas próprias (`config/routes_plataforma.php`) que tornam qualquer outra URI 404 no painel; controllers `Plataforma_*` dão 404 fora dele.
+- Migration do mestre `20261107010000_create_plataforma`: `plataforma_usuarios`, `plataforma_auditoria`, `ci_sessions`, `login_attempts`.
+- CLI: `tools plataforma_conta`, `tools plataforma_senha`.
+
+### Fixed (2026-11-07 — noite)
+- Provisionamento carrega o `banco.sql` como o instalador e só então aplica as migrations posteriores. Rodando todas as migrations desde 2012, 11 colunas saíam diferentes de uma instalação nova (`cobrancas.charge_id` como `int`, onde os gateways gravam texto) e duas migrations antigas falhavam em silêncio. Agora colunas e índices são idênticos aos de uma instalação nova. Sai `application/config/tenant_dados_iniciais.php`, que ficou redundante.
+- `application/.env.example`: o comentário da multi-tenancy tinha parênteses e quebrava o parser de INI do PHP (`CookieSeguroTest`).
+
 ### Added (2026-11-07 — tarde)
 - `tenant_dominios` (migration do mestre `20261107000000`): vários domínios por tenant — subdomínio de plataforma (verificado no provisionamento) e domínios próprios com verificação por TXT no DNS. `tenants.dominio` migra para a tabela nova; rollback devolve.
-- Provisionamento cria configurações padrão, o perfil Administrador (iguais a `banco.sql`, conferidos por `TenantDadosIniciaisTest`) e o usuário admin com o e-mail do pedido e senha aleatória.
+- Provisionamento cria o usuário admin com o e-mail do pedido e senha aleatória (em 2026-11-07, noite, passou a carregar o `banco.sql` como o instalador — ver abaixo).
 - CLI: `tools tenant_dominio`, `tools tenant_verificar`; `tools tenant_criar` recebe o e-mail do admin.
 - `.env`: `SAAS_DOMINIO_BASE`, `SAAS_PAINEL_HOST`.
 - `docker/teste/`: ambiente local no navegador (nginx + PHP-FPM 8.5 em `127.0.0.1:8090`, `*.localhost`) e MySQL de testes em memória separado.

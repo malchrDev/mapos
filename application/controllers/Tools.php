@@ -57,6 +57,8 @@ class Tools extends CI_Controller
         $result .= "php index.php tools tenant_dominio \"atual\" \"novo\"   Multi-tenancy: add a custom domain.\n";
         $result .= "php index.php tools tenant_verificar \"dominio\"       Multi-tenancy: verify a custom domain (DNS TXT).\n";
         $result .= "php index.php tools tenants_migrate                Multi-tenancy: migrate every tenant schema.\n";
+        $result .= "php index.php tools plataforma_conta \"email\" \"nome\"  Platform panel: create an admin account.\n";
+        $result .= "php index.php tools plataforma_senha \"email\"         Platform panel: new password for an account.\n";
 
         echo $result . PHP_EOL;
     }
@@ -172,6 +174,54 @@ class Tools extends CI_Controller
                 echo "{$tenant['nome']} ({$tenant['schema']}): ok" . PHP_EOL;
             }
         });
+    }
+
+    /**
+     * Painel da plataforma: cria uma conta de administrador da plataforma
+     * (banco mestre) e mostra a senha inicial, uma vez.
+     */
+    public function plataforma_conta($email = null, $nome = null)
+    {
+        if (! $email || ! $nome) {
+            echo 'Uso: php index.php tools plataforma_conta "email" "nome" (espaço como %20 e @ como %40)' . PHP_EOL;
+
+            return;
+        }
+
+        $this->executarTenant(function (Tenant_manager $tenants) use ($email, $nome) {
+            $contas = $this->contasDaPlataforma($tenants);
+            $email = urldecode($email);
+            $senha = $contas->criar(urldecode($nome), $email);
+            $contas->auditar(null, 'conta_criada', $email . ' (CLI)', 'cli');
+            echo "Conta da plataforma criada: {$email}  senha inicial: {$senha}" . PHP_EOL;
+        });
+    }
+
+    /**
+     * Painel da plataforma: nova senha para uma conta (encerra as sessões dela).
+     */
+    public function plataforma_senha($email = null)
+    {
+        if (! $email) {
+            echo 'Uso: php index.php tools plataforma_senha "email" (@ como %40)' . PHP_EOL;
+
+            return;
+        }
+
+        $this->executarTenant(function (Tenant_manager $tenants) use ($email) {
+            $contas = $this->contasDaPlataforma($tenants);
+            $email = urldecode($email);
+            $senha = $contas->redefinirSenha($email);
+            $contas->auditar(null, 'senha_redefinida', 'conta da plataforma ' . $email . ' (CLI)', 'cli');
+            echo "Nova senha de {$email}: {$senha}" . PHP_EOL;
+        });
+    }
+
+    private function contasDaPlataforma(Tenant_manager $tenants): Plataforma_contas
+    {
+        $this->load->library('Plataforma_contas', ['db' => $tenants->conexaoMestre()]);
+
+        return $this->plataforma_contas;
     }
 
     private function executarTenant(callable $acao)

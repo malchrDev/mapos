@@ -49,7 +49,7 @@ GRANT ALL PRIVILEGES ON `mapos\_%`.* TO 'mapos'@'%';
 | Host da requisição | Resposta |
 | --- | --- |
 | domínio verificado de tenant `ativo` | segue para o Map-OS no schema do tenant |
-| `SAAS_PAINEL_HOST` | 503 (o painel ainda não existe; o hostname já é reservado) |
+| `SAAS_PAINEL_HOST` | painel administrativo da plataforma, no banco mestre (ver abaixo) |
 | desconhecido, inválido, de tenant suspenso/cancelado, domínio próprio não verificado | **404** |
 | banco mestre fora do ar | **503**, e a falha vai para o `error_log` do PHP |
 
@@ -92,10 +92,40 @@ php index.php tools tenant_criar loja.seusaas.com.br "Loja%20Exemplo" "dono%40lo
 php index.php tools tenant_dominio loja.seusaas.com.br www.loja.com.br   # mostra o TXT
 php index.php tools tenant_verificar www.loja.com.br                    # confere o TXT
 php index.php tools tenants_migrate                  # leva todos os tenants à última migration
+php index.php tools plataforma_conta "voce%40empresa.com" "Seu%20Nome"   # conta do painel da plataforma
+php index.php tools plataforma_senha "voce%40empresa.com"               # nova senha para essa conta
 ```
 
-Depois de cada deploy: `tenant_mestre` e `tenants_migrate`. Enquanto o painel
-administrativo não existe, o provisionamento é por aqui.
+Depois de cada deploy: `tenant_mestre` e `tenants_migrate`. A primeira conta do
+painel da plataforma só nasce pelo CLI (`plataforma_conta`); o resto se faz pelo
+painel.
+
+## Painel administrativo da plataforma
+
+No hostname `SAAS_PAINEL_HOST` o hook aponta a conexão para o **banco mestre** e
+marca o contexto `plataforma`. `config/routes.php` então troca a tabela de rotas
+inteira pela de `config/routes_plataforma.php`: só os controllers
+`Plataforma_*` respondem, e qualquer outra URI (telas de tenant, API, `tools`)
+é 404. Os controllers `Plataforma_*` também se recusam a rodar fora desse
+hostname (`Plataforma_Controller`), mesmo chamados pelo nome.
+
+| Tela | O que faz |
+| --- | --- |
+| `/login` | Entrada (superfície escura do DESIGN.md), com `Limite_login` no escopo `plataforma` |
+| `/empresas` | Lista com busca (nome, CPF/CNPJ, domínio) e filtro de status |
+| `/empresas/nova` | Cria a empresa (provisionamento) e mostra a senha do admin **uma vez** |
+| `/empresas/<id>` | Status, domínios (com o TXT de verificação), usuários e histórico |
+| — suspender / reativar | Suspensa, os endereços da empresa respondem 404; os dados ficam |
+| — domínio próprio | Cadastra e verifica pelo TXT no DNS |
+| — nova senha | Para qualquer usuário da empresa; encerra as sessões e tokens dele |
+| `/auditoria` | Trilha de todas as ações do painel (`plataforma_auditoria`) |
+
+Contas do painel (`plataforma_usuarios`) e usuários das empresas não se
+misturam: um admin de empresa não entra no painel, e uma conta do painel não
+entra numa empresa. A conta é relida a cada requisição: desativada ou com a
+senha trocada, a sessão aberta antes cai. Senhas geradas só aparecem na
+resposta do próprio POST (nunca em flashdata), e as telas do painel vão com
+`Cache-Control: no-store`.
 
 ## Provisionamento
 
@@ -109,14 +139,23 @@ ordem:
    O sufixo impede que `a-b.com` e `ab.com` caiam no mesmo schema.
 3. **`criarSchema()`** — `CREATE DATABASE`. Schema que já existe é **erro**, nunca
    reaproveitado: reaproveitar entregaria a um tenant os dados de outro.
-4. **`migrarSchema()`** — roda as migrations de negócio numa conexão própria do
-   schema novo. `$CI->db`/`$CI->dbforge` são trocados durante a execução e
-   devolvidos no fim.
-5. **Dados iniciais** — as configurações padrão e o perfil Administrador de uma
-   instalação nova (`application/config/tenant_dados_iniciais.php`, conferido
-   contra `banco.sql` por `TenantDadosIniciaisTest`) e o usuário admin com o
-   e-mail do pedido e uma **senha aleatória**.
+4. **`carregarBancoSql()`** — carrega o `banco.sql` como o instalador faz
+   (`instaladorMontarSql()` troca os marcadores do admin pelo e-mail do pedido e
+   uma **senha aleatória**): esquema, configurações padrão e perfil
+   Administrador. O endereço e o documento de exemplo do admin são apagados.
+5. **`migrarSchema()`** — aplica as migrations posteriores à versão que o
+   `banco.sql` grava, numa conexão própria do schema novo.
+   `$CI->db`/`$CI->dbforge` são trocados durante a execução e devolvidos no fim.
 6. **INSERT em `tenants` e `tenant_dominios`** no mestre, numa transação.
+
+**Por que `banco.sql` e não todas as migrations desde 2012:** o histórico antigo
+de migrations do Map-OS diverge do `banco.sql` — rodado do zero, ele deixa
+`cobrancas.charge_id` como `int` (os gateways gravam texto ali), `vendas.garantia`
+como `varchar`, e duas migrations de 2021–2022 falham em silêncio. Carregando o
+`banco.sql`, o banco de cada empresa sai **idêntico** ao de uma instalação nova
+(conferido coluna a coluna e índice a índice), que é o que o resto do sistema
+espera. `TenantIsolamentoTest::testEsquemaDoTenantEOMesmoDeUmaInstalacaoNova`
+guarda as colunas que divergiam.
 
 A ordem é do mais barato de desfazer para o mais caro. Se qualquer passo depois
 do `CREATE DATABASE` falhar, o schema é dropado: sem registro no mestre nenhuma
@@ -150,6 +189,9 @@ docker compose -f docker/teste/docker-compose.yml up -d --build --wait
 docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_mestre
 docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_criar loja1.localhost "Loja%201" "admin%40loja1.com"
 # abrir http://loja1.localhost:8090 e entrar com o e-mail e a senha mostrados
+
+docker compose -f docker/teste/docker-compose.yml exec web php index.php tools plataforma_conta "voce%40empresa.com" "Seu%20Nome"
+# abrir http://painel.localhost:8090 — painel da plataforma
 ```
 
 Os dados ficam num volume (`down` mantém, `down -v` apaga). O MySQL desse
