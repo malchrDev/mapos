@@ -206,6 +206,26 @@ final class TenantIsolamentoTest extends TestCase
         );
     }
 
+    public function testCadaTenantTemPastaDeUploadsPropriaEAMigrationNaoVazaOContexto(): void
+    {
+        $alfa = $this->provisionar('uploads-alfa.teste.local')['schema'];
+        $beta = $this->provisionar('uploads-beta.teste.local')['schema'];
+
+        $this->assertNotSame($this->tenants->pastaArmazenamento($alfa), $this->tenants->pastaArmazenamento($beta));
+        $this->assertStringEndsWith(DIRECTORY_SEPARATOR . $alfa, $this->tenants->pastaArmazenamento($alfa));
+
+        $GLOBALS['mapos_tenant_schema'] = $beta;
+        try {
+            $this->tenants->migrarSchema($alfa);
+            $this->assertSame($beta, $GLOBALS['mapos_tenant_schema'], 'migrarSchema() devolve o tenant que estava ativo.');
+        } finally {
+            unset($GLOBALS['mapos_tenant_schema']);
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->tenants->pastaArmazenamento('../outro');
+    }
+
     public function testProvisionarNaoMexeNoBancoPadrao(): void
     {
         $padrao = $this->conexao($_ENV['DB_DATABASE']);

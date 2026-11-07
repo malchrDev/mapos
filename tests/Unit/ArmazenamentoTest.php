@@ -25,7 +25,7 @@ final class ArmazenamentoTest extends MaposTestCase
         } else {
             $_ENV['STORAGE_PATH'] = $this->envAnterior;
         }
-        unset($_ENV['UPLOAD_MAX_KB']);
+        unset($_ENV['UPLOAD_MAX_KB'], $GLOBALS['mapos_tenant_schema']);
         $this->apagar($this->raiz);
         parent::tearDown();
     }
@@ -56,6 +56,53 @@ final class ArmazenamentoTest extends MaposTestCase
 
         unset($_ENV['STORAGE_PATH']);
         $this->assertSame(rtrim(APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'storage', armazenamentoRaiz());
+    }
+
+    public function testComTenantARaizESubpastaDoSchema(): void
+    {
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja1_a1b2c3';
+
+        $this->assertSame($this->raiz . DIRECTORY_SEPARATOR . 'mapos_loja1_a1b2c3', armazenamentoRaiz());
+
+        $pasta = armazenamentoPasta('anexos/11-2026/OS-1');
+        $this->assertSame($this->raiz . '/mapos_loja1_a1b2c3/anexos/11-2026/OS-1', str_replace('\\', '/', (string) $pasta));
+        $this->assertFileExists($this->raiz . '/mapos_loja1_a1b2c3/.htaccess', 'A pasta do tenant também nega o acesso web.');
+
+        unset($GLOBALS['mapos_tenant_schema']);
+        $this->assertSame($this->raiz, armazenamentoRaiz(), 'Sem tenant, volta à raiz da instalação única.');
+    }
+
+    public function testTenantNaoLeArquivoDeOutroTenant(): void
+    {
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja1_a1b2c3';
+        $pastaLoja1 = armazenamentoPasta('anexos/11-2026/OS-1');
+        file_put_contents($pastaLoja1 . '/segredo.png', 'x');
+        $anexo = (object) ['path' => 'anexos/11-2026/OS-1', 'anexo' => 'segredo.png', 'thumb' => ''];
+        $this->assertNotNull(armazenamentoArquivoDoAnexo($anexo), 'O próprio tenant acha o arquivo.');
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja2_d4e5f6';
+        armazenamentoPasta('anexos');
+
+        $this->assertNull(armazenamentoArquivoDoAnexo($anexo), 'O mesmo caminho relativo não existe na pasta da loja2.');
+        $this->assertNull(armazenamentoLocalizar('../mapos_loja1_a1b2c3/anexos/11-2026/OS-1/segredo.png'), 'Subir para a pasta da loja1 é recusado.');
+        $this->assertNull(armazenamentoLocalizar($pastaLoja1 . '/segredo.png'), 'Caminho absoluto para a pasta da loja1 é recusado.');
+        $this->assertNull(armazenamentoPasta('../mapos_loja1_a1b2c3/anexos'));
+    }
+
+    public function testSchemaDeTenantInvalidoFalhaFechado(): void
+    {
+        foreach (['../fora', 'Mapos', 'a/b', 'a b', str_repeat('a', 65)] as $invalido) {
+            $GLOBALS['mapos_tenant_schema'] = $invalido;
+            try {
+                armazenamentoRaiz();
+                $this->fail('Schema aceito: ' . $invalido);
+            } catch (RuntimeException $erro) {
+                $this->assertStringContainsString('inválido', $erro->getMessage());
+            }
+        }
+
+        $GLOBALS['mapos_tenant_schema'] = '';
+        $this->assertSame($this->raiz, armazenamentoRaiz(), 'Vazio equivale a instalação única.');
     }
 
     public function testLimiteConfiguravel(): void

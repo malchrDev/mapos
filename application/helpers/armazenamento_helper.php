@@ -19,21 +19,49 @@ if (! function_exists('armazenamentoRaiz')) {
      * Pasta raiz dos uploads: STORAGE_PATH (absoluto, ou relativo à raiz do
      * projeto) ou, sem ela, application/storage, que recebe um .htaccess que
      * nega o acesso web. O ideal é apontar STORAGE_PATH para fora da pasta
-     * pública (docs/armazenamento-de-arquivos.md).
+     * pública (docs/armazenamento-de-arquivos.md). Com multi-tenancy, a raiz
+     * é a subpasta do schema da empresa (armazenamentoTenant()).
      */
     function armazenamentoRaiz(): string
     {
         $configurado = trim((string) ($_ENV['STORAGE_PATH'] ?? ''));
 
         if ($configurado === '') {
-            return rtrim(APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'storage';
+            $raiz = rtrim(APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'storage';
+        } else {
+            if (! armazenamentoCaminhoAbsoluto($configurado)) {
+                $configurado = rtrim(FCPATH, '/\\') . DIRECTORY_SEPARATOR . $configurado;
+            }
+            $raiz = rtrim($configurado, '/\\');
         }
 
-        if (! armazenamentoCaminhoAbsoluto($configurado)) {
-            $configurado = rtrim(FCPATH, '/\\') . DIRECTORY_SEPARATOR . $configurado;
+        $schema = armazenamentoTenant();
+
+        return $schema === null ? $raiz : $raiz . DIRECTORY_SEPARATOR . $schema;
+    }
+}
+
+if (! function_exists('armazenamentoTenant')) {
+    /**
+     * Schema da empresa atendida agora (multi-tenancy), ou null na instalação
+     * única. O hook tenant.php grava o schema em $GLOBALS['mapos_tenant_schema'],
+     * e o Tenant_manager faz o mesmo enquanto roda as migrations de um tenant.
+     * Cada empresa tem a própria pasta dentro de STORAGE_PATH, e os caminhos no
+     * banco continuam relativos a ela. Um valor fora do padrão de nome de
+     * schema derruba a requisição em vez de cair na pasta comum.
+     */
+    function armazenamentoTenant(): ?string
+    {
+        $schema = $GLOBALS['mapos_tenant_schema'] ?? null;
+        if ($schema === null || $schema === '') {
+            return null;
         }
 
-        return rtrim($configurado, '/\\');
+        if (! is_string($schema) || ! preg_match('/^[a-z0-9_]{1,64}$/', $schema)) {
+            throw new RuntimeException('Schema de tenant inválido para o armazenamento.');
+        }
+
+        return $schema;
     }
 }
 

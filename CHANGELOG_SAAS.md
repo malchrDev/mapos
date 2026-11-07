@@ -9,6 +9,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Security (2026-11-07, uploads)
+- Uploads separados por empresa: anexos de OS, arquivos e o log de CSP ficam em `STORAGE_PATH/<schema>/` (`armazenamentoTenant()`, gravado pelo hook). Antes, todas as empresas gravavam na mesma pasta. Caminho que sobe para a pasta de outra empresa é recusado; schema fora do padrão derruba a requisição.
+- `Tenant_manager::migrarSchema()` roda as migrations com a pasta do tenant ativa; `pastaArmazenamento()` dá a pasta de uma empresa.
+
 ### Added (2026-11-07 — noite)
 - Painel administrativo da plataforma em `SAAS_PAINEL_HOST`: login com `Limite_login` (escopo `plataforma`), empresas (listar, buscar, criar, suspender, reativar), domínios próprios com verificação, nova senha para usuário de empresa e trilha de auditoria. Rotas próprias (`config/routes_plataforma.php`) que tornam qualquer outra URI 404 no painel; controllers `Plataforma_*` dão 404 fora dele.
 - Migration do mestre `20261107010000_create_plataforma`: `plataforma_usuarios`, `plataforma_auditoria`, `ci_sessions`, `login_attempts`.

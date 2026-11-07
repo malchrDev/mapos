@@ -691,11 +691,36 @@ class Tenant_manager
     {
         $this->validarNomeSchema($schema);
 
+        // Migrations que mexem em arquivos (20261014030000_move_uploads_to_storage)
+        // precisam usar a pasta deste tenant, não a da requisição/CLI atual.
+        $schemaAnterior = $GLOBALS['mapos_tenant_schema'] ?? null;
+        $GLOBALS['mapos_tenant_schema'] = $schema;
+
         $conexao = $this->conexao($schema);
         try {
             $this->rodarMigrations($conexao, APPPATH . self::MIGRATIONS_TENANT);
         } finally {
             $conexao->close();
+            $GLOBALS['mapos_tenant_schema'] = $schemaAnterior;
+        }
+    }
+
+    /**
+     * Pasta de uploads do tenant (STORAGE_PATH/<schema>), para backup e
+     * exclusão. Pode não existir se a empresa nunca enviou arquivo.
+     */
+    public function pastaArmazenamento(string $schema): string
+    {
+        $this->validarNomeSchema($schema);
+
+        $anterior = $GLOBALS['mapos_tenant_schema'] ?? null;
+        $GLOBALS['mapos_tenant_schema'] = $schema;
+        try {
+            $this->CI->load->helper('armazenamento');
+
+            return armazenamentoRaiz();
+        } finally {
+            $GLOBALS['mapos_tenant_schema'] = $anterior;
         }
     }
 

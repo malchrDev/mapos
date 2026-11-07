@@ -44,6 +44,8 @@ function resolverTenant()
         case 'tenant':
             tenantApontarBanco($resultado['schema'], $host);
             $GLOBALS['mapos_contexto'] = 'tenant';
+            // Uploads em STORAGE_PATH/<schema>/ (armazenamentoTenant()).
+            $GLOBALS['mapos_tenant_schema'] = $resultado['schema'];
 
             return;
 

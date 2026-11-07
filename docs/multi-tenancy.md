@@ -178,6 +178,34 @@ instalação única. Separadas, nenhuma migration do mestre entra num tenant, e 
 verificação de "banco desatualizado" do painel (que compara a pasta com a versão
 do banco) continua correta em cada tenant.
 
+## Uploads por empresa
+
+Os anexos de OS, os arquivos da tela **Arquivos** e o log de CSP ficam em
+`STORAGE_PATH/<schema>/` (ver `docs/armazenamento-de-arquivos.md`). O hook grava
+o schema em `$GLOBALS['mapos_tenant_schema']` e `armazenamentoRaiz()` devolve a
+subpasta dele. Os caminhos no banco continuam relativos (`anexos/11-2026/OS-1`),
+então nenhum controller mudou, e o mesmo caminho em outra empresa aponta para a
+pasta dela. Subir de pasta (`../outro_schema/...`) ou usar um caminho absoluto
+para a pasta de outra empresa é recusado por `armazenamentoLocalizar()`.
+
+- `migrarSchema()` ativa o schema do tenant enquanto roda as migrations (a
+  `move_uploads_to_storage` mexe em arquivos) e devolve o anterior no fim.
+- `Tenant_manager::pastaArmazenamento($schema)` dá a pasta de uma empresa, para
+  backup e exclusão.
+- Um valor de schema fora de `[a-z0-9_]{1,64}` derruba a requisição em vez de
+  cair na pasta comum.
+- A pasta nasce no primeiro upload e recebe o próprio `.htaccess` que nega o
+  acesso web.
+
+A logo do emitente e as fotos de perfil continuam em `assets/uploads` e
+`assets/userImage`, numa pasta comum a todas as empresas. São públicas por
+desenho e têm nome aleatório; cada empresa só aponta para os próprios arquivos
+pelo banco dela. Na exclusão de uma empresa (Fase 6) eles precisam ser apagados
+a partir de `emitente.url_logo` e `usuarios.url_image_user` do schema.
+
+**Ao converter uma instalação única em tenant**, mova o conteúdo de
+`STORAGE_PATH` para `STORAGE_PATH/<schema>/`, mantendo as subpastas.
+
 ## Ambiente local (Docker)
 
 `docker/teste/` sobe MySQL 8.4, PHP-FPM 8.5 e nginx em `127.0.0.1:8090`. Os
@@ -219,7 +247,9 @@ Fora do container (sem `DB_MASTER_DATABASE`) os testes são pulados.
 esquecimento da empresa é uma operação, não uma varredura linha por linha. Apagar
 o registro em `tenants` leva os domínios junto (`ON DELETE CASCADE`).
 `provisionar()` só a chama em uma tentativa que falhou; a exclusão definitiva de um
-tenant em produção é da Fase 6 (backup por tenant).
+tenant em produção é da Fase 6 (backup por tenant). Ela também precisa apagar
+`pastaArmazenamento($schema)` e a logo e as fotos de perfil da empresa (ver
+"Uploads por empresa").
 
 O nome do schema entra em SQL cru (`CREATE`/`DROP DATABASE` não aceita binding),
 então `validarNomeSchema()` só aceita `mapos_` + `[a-z0-9_]{1,50}` e recusa o
