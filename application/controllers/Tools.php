@@ -60,6 +60,7 @@ class Tools extends CI_Controller
         $result .= "php index.php tools plataforma_conta \"email\" \"nome\"  Platform panel: create an admin account.\n";
         $result .= "php index.php tools plataforma_senha \"email\"         Platform panel: new password for an account.\n";
         $result .= "php index.php tools plataforma_2fa \"email\"           Platform panel: reset the 2FA of an account.\n";
+        $result .= "php index.php tools tenants_tarefa email process       Run a scheduled task for every active tenant.\n";
 
         echo $result . PHP_EOL;
     }
@@ -215,6 +216,52 @@ class Tools extends CI_Controller
             $senha = $contas->redefinirSenha($email);
             $contas->auditar(null, 'senha_redefinida', 'conta da plataforma ' . $email . ' (CLI)', 'cli');
             echo "Nova senha de {$email}: {$senha}" . PHP_EOL;
+        });
+    }
+
+    /**
+     * Roda uma tarefa agendada para cada empresa ativa, uma por vez, cada uma
+     * num processo próprio (Tenant_manager::executarTarefa). Só tarefas de
+     * Tenant_manager::TAREFAS_POR_TENANT. A falha de uma empresa vai para o log e
+     * não impede as outras; o código de saída é 1 se alguma falhou. Uma trava
+     * impede que duas execuções da mesma tarefa se sobreponham (cron curto).
+     *
+     *     php index.php tools tenants_tarefa email process
+     */
+    public function tenants_tarefa($controller = null, $metodo = null)
+    {
+        $this->load->library('Tenant_manager');
+        $tarefa = $controller . '/' . $metodo;
+        if (! in_array($tarefa, Tenant_manager::TAREFAS_POR_TENANT, true)) {
+            echo 'Uso: php index.php tools tenants_tarefa <tarefa>, com tarefa em: ' . implode(', ', array_map(static fn ($t) => str_replace('/', ' ', $t), Tenant_manager::TAREFAS_POR_TENANT)) . PHP_EOL;
+            exit(1);
+        }
+
+        $this->executarTenant(function (Tenant_manager $tenants) use ($tarefa) {
+            $trava = fopen(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mapos-' . md5(Tenant_manager::bancoMestre() . '|' . $tarefa) . '.lock', 'c');
+            if ($trava === false || ! flock($trava, LOCK_EX | LOCK_NB)) {
+                echo "{$tarefa}: execução anterior ainda rodando; nada feito." . PHP_EOL;
+
+                return;
+            }
+
+            $falhas = 0;
+            $ativas = array_filter($tenants->listar(), static fn ($t) => $t['status'] === 'ativo');
+            foreach ($ativas as $tenant) {
+                $resultado = $tenants->executarTarefa($tenant['schema'], array_merge([PHP_BINARY, FCPATH . 'index.php'], explode('/', $tarefa)));
+                if ($resultado['codigo'] !== 0) {
+                    $falhas++;
+                    log_message('error', "tenants_tarefa {$tarefa} {$tenant['schema']}: código {$resultado['codigo']}: {$resultado['saida']}");
+                }
+                echo sprintf('%-40s %s (%.2fs)', $tenant['schema'], $resultado['codigo'] === 0 ? 'ok' : ($resultado['codigo'] === -1 ? 'TEMPO ESGOTADO' : 'FALHOU ' . $resultado['codigo']), $resultado['tempo']) . PHP_EOL;
+            }
+
+            echo "{$tarefa}: " . count($ativas) . ' empresa(s), ' . $falhas . ' falha(s).' . PHP_EOL;
+            flock($trava, LOCK_UN);
+            fclose($trava);
+            if ($falhas > 0) {
+                exit(1);
+            }
         });
     }
 

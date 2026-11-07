@@ -9,6 +9,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07, tarefas por empresa)
+- `tools tenants_tarefa email process|retry`: roda a fila de e-mails de cada empresa ativa, cada uma num processo próprio, com trava contra execuções sobrepostas e limite de tempo. Antes, as filas das empresas nunca eram enviadas (o cron só via o banco padrão).
+- Hook na linha de comando: `MAPOS_TENANT_SCHEMA` aponta o processo para uma empresa ativa; outra coisa encerra com código 3.
+- `SAAS_EMAIL_REMETENTE`: e-mails das empresas saem pelo remetente da plataforma, com o nome da empresa e Reply-To para ela (SPF/DMARC).
+- `docker/teste/`: Mailpit (SMTP de teste) em http://127.0.0.1:8026.
+
 ### Added (2026-11-07, gestão do painel)
 - 2FA obrigatório nas contas do painel da plataforma (migration do mestre `20261108000000`): login em dois passos, ativação em Minha conta, códigos de recuperação, sem "desativar". CLI `tools plataforma_2fa` para redefinir.
 - Minha conta: novos códigos de recuperação e troca da própria senha (mínimo 12 caracteres; as outras sessões caem).

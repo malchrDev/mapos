@@ -81,6 +81,10 @@ entra aqui.
 1. Processo ITIL e controle ISO prioritários para o primeiro cliente (sugestão
    em avaliação: Incidente/Requisição + SLA primeiro; auditoria imutável, backup
    por tenant e LGPD primeiro na ISO 27001).
+2. Serviço de armazenamento externo do backup automático da plataforma
+   (sugestão: Backblaze B2 ou Cloudflare R2). Detalhes em RETOMADA_FASE1.md,
+   seção "Backup: o que falta". A exportação para o Google Drive do cliente fica
+   como opcional, depois do backup oficial.
 
 ## Critérios de aceitação da Fase 1
 

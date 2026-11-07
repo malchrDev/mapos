@@ -829,6 +829,68 @@ class Tenant_manager
         return ['usuarios' => $usuarios, 'os_mes' => $osMes, 'armazenamento_mb' => round($bytes / 1048576, 1)];
     }
 
+    /** Tarefas agendadas que rodam para cada empresa (`tools tenants_tarefa`). */
+    public const TAREFAS_POR_TENANT = ['email/process', 'email/retry'];
+
+    /**
+     * Roda um comando num processo próprio para uma empresa: o processo filho
+     * recebe MAPOS_TENANT_SCHEMA e o hook aponta banco, uploads e tokens para
+     * ela (tenantResolverCli). Um processo por empresa: nada da empresa
+     * anterior (conexão, singletons do CI, globais) chega na seguinte.
+     *
+     * @param  list<string>  $comando  Executável e argumentos, sem shell
+     * @return array{codigo:int, saida:string, tempo:float}  código -1 = estourou o tempo
+     */
+    public function executarTarefa(string $schema, array $comando, int $limiteSegundos = 300): array
+    {
+        $this->validarNomeSchema($schema);
+
+        // O filho herda o ambiente inteiro (env null). Passar um array faria o
+        // proc_open descartar as variáveis vazias (EMAIL_SMTP_CRYPTO= vira o
+        // padrão 'tls' no filho), então o schema entra por putenv só durante
+        // a chamada.
+        $anterior = getenv('MAPOS_TENANT_SCHEMA');
+        putenv('MAPOS_TENANT_SCHEMA=' . $schema);
+
+        $inicio = microtime(true);
+        try {
+            $processo = proc_open($comando, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $tubos);
+        } finally {
+            putenv($anterior === false ? 'MAPOS_TENANT_SCHEMA' : 'MAPOS_TENANT_SCHEMA=' . $anterior);
+        }
+        if (! is_resource($processo)) {
+            throw new RuntimeException('Não foi possível iniciar o processo da tarefa.');
+        }
+        fclose($tubos[0]);
+        stream_set_blocking($tubos[1], false);
+        stream_set_blocking($tubos[2], false);
+
+        $saida = '';
+        $codigo = null;
+        while (true) {
+            $saida .= (string) stream_get_contents($tubos[1]) . (string) stream_get_contents($tubos[2]);
+            $estado = proc_get_status($processo);
+            if (! $estado['running']) {
+                $codigo = (int) $estado['exitcode'];
+                break;
+            }
+            if (microtime(true) - $inicio > $limiteSegundos) {
+                proc_terminate($processo, 9);
+                $codigo = -1;
+                break;
+            }
+            $leitura = [$tubos[1], $tubos[2]];
+            $nada = null;
+            @stream_select($leitura, $nada, $nada, 0, 200000);
+        }
+        $saida .= (string) stream_get_contents($tubos[1]) . (string) stream_get_contents($tubos[2]);
+        fclose($tubos[1]);
+        fclose($tubos[2]);
+        proc_close($processo);
+
+        return ['codigo' => $codigo, 'saida' => mb_substr(trim($saida), 0, 2000), 'tempo' => round(microtime(true) - $inicio, 2)];
+    }
+
     /**
      * Tabelas cujo conteúdo não vai para o backup (só a estrutura): sessões,
      * tentativas de login, tokens e resets são segredos temporários, como no

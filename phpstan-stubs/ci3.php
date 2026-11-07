@@ -276,6 +276,19 @@ class CI_Email
     /** @var array */
     public $_headers = [];
 
+    /** @var bool Já houve reply_to() neste envio (CI_Email::$_replyto_flag) */
+    protected $_replyto_flag = false;
+
+    /**
+     * @param  string  $replyto
+     * @param  string  $name
+     * @return static
+     */
+    public function reply_to($replyto, $name = '')
+    {
+        return $this;
+    }
+
     /** @var array */
     public $_recipients = [];
 

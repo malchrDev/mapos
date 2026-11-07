@@ -44,12 +44,35 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
 
 1. ~~Uploads por tenant~~ feito em 2026-11-07 (`STORAGE_PATH/<schema>/`).
 2. ~~JWT da API vinculado ao tenant~~ feito em 2026-11-07 (chave derivada por schema + claim `ten`).
-3. Tarefas agendadas (cron do Map-OS, e-mails) rodando para cada tenant.
+3. ~~Tarefas agendadas por tenant~~ feito em 2026-11-07: `tools tenants_tarefa`
+   (fila de e-mails), hook na CLI por `MAPOS_TENANT_SCHEMA`,
+   `SAAS_EMAIL_REMETENTE`. Pendente: os logs (`application/logs`) ainda
+   misturam as empresas, sem indicar de qual é cada linha.
 4. ~~Painel da plataforma~~ feito em 2026-11-07: 2FA obrigatório, contas do
    painel, minha conta, planos e vencimento, backup, cancelar e excluir
    empresa. Fica para a Fase 5: cobrança (gateway a escolher) e bloqueio
    automático por vencimento e por limite do plano.
 5. PR da branch.
+
+## Backup: o que falta (combinado em 2026-11-07, fazer no fim da lista)
+
+Hoje o painel gera o backup de uma empresa na hora (.zip com banco, uploads,
+logo, fotos e LEIA-ME) e guarda em `SAAS_BACKUP_PATH`, no próprio servidor.
+
+1. **Backup automático da plataforma** (o oficial, sob controle da plataforma):
+   diário pelo cron do item 3, enviado para armazenamento de objetos fora do
+   servidor, criptografado antes de sair, com retenção (por exemplo, 30
+   diários e 12 mensais). **Decisão pendente:** qual serviço (sugestão:
+   Backblaze B2 ou Cloudflare R2, compatíveis com S3; alternativas: AWS S3,
+   Wasabi, Google Cloud Storage).
+2. **Restaurar pelo painel** a partir de um backup (hoje é manual, pelo LEIA-ME).
+3. **Opcional: exportação para o Google Drive do próprio cliente**, configurada
+   pelo admin da empresa. É uma cópia do cliente e não substitui o backup
+   oficial. Cuidados:
+   - escopo `drive.file` (o escopo do Drive inteiro exige auditoria paga do Google);
+   - exportação sem segredos (hashes de senha, segredos de 2FA, tokens);
+   - token do Google cifrado no banco da empresa;
+   - pode ser vantagem de plano.
 
 ## Feito em 2026-11-07 (noite)
 

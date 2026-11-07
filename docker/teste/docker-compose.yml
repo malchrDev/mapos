@@ -6,6 +6,7 @@
 #   docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_mestre
 #   docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_criar loja1.localhost "Loja%201" admin@loja1.com
 #   -> abrir http://loja1.localhost:8090
+#   -> e-mails enviados: http://127.0.0.1:8026 (Mailpit)
 #
 # Testes de integração (usam bancos próprios, não mexem nos tenants acima):
 #   docker compose -f docker/teste/docker-compose.yml run --rm testes
@@ -55,6 +56,13 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+
+  # SMTP de teste: guarda todo e-mail enviado, nada sai para a internet.
+  # Caixa de entrada em http://127.0.0.1:8026
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "127.0.0.1:8026:8025"
 
   nginx:
     image: nginx:1.27-alpine

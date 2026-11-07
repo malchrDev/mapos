@@ -250,6 +250,43 @@ pelo banco dela. O backup e a exclusão de uma empresa levam os dela, achados po
 **Ao converter uma instalação única em tenant**, mova o conteúdo de
 `STORAGE_PATH` para `STORAGE_PATH/<schema>/`, mantendo as subpastas.
 
+## Tarefas agendadas por empresa
+
+A fila de e-mails (`email_queue`) fica no banco de cada empresa. Na linha de
+comando não há Host, então o cron da instalação única (`php index.php email
+process`) só esvaziaria a fila do banco padrão. Com multi-tenancy, o cron chama:
+
+```cron
+*/2 * * * * php /caminho/index.php tools tenants_tarefa email process >> /var/log/mapos-cron.log 2>&1
+*/5 * * * * php /caminho/index.php tools tenants_tarefa email retry   >> /var/log/mapos-cron.log 2>&1
+```
+
+- `tenants_tarefa` roda a tarefa para cada empresa **ativa**, uma por vez, cada
+  uma num **processo próprio** (`Tenant_manager::executarTarefa`, limite de 5
+  minutos). Nada de uma empresa (conexão, singletons do CI, globais) chega na
+  seguinte.
+- O processo filho recebe `MAPOS_TENANT_SCHEMA`; o hook (`tenantResolverCli`)
+  aponta banco, uploads e chave dos tokens para a empresa. Schema que não é de
+  empresa ativa encerra o processo (código 3; mestre fora do ar, 4) em vez de
+  rodar no banco padrão.
+- Só tarefas de `Tenant_manager::TAREFAS_POR_TENANT` (`email/process`,
+  `email/retry`). Uma trava (`flock`) impede duas execuções da mesma tarefa ao
+  mesmo tempo. Falha de uma empresa vai para o log e não para as outras; o
+  código de saída é 1 se alguma falhou.
+- O filho herda o ambiente inteiro. Passar o ambiente como array ao
+  `proc_open` descarta as variáveis vazias: `EMAIL_SMTP_CRYPTO=` virava o
+  padrão `tls` no filho.
+
+**Remetente.** Todas as empresas usam o SMTP do `.env`. Mandar "De:
+contato@empresa.com" por um servidor que não é do domínio dela falha no SPF e
+no DMARC e cai em spam. Com `SAAS_EMAIL_REMETENTE` preenchido, o e-mail de uma
+empresa sai como `"Nome da empresa" <SAAS_EMAIL_REMETENTE>`, com Reply-To para o
+e-mail dela e o envelope (Return-Path) no domínio da plataforma
+(`MY_Email::cabecalhosDaPlataforma`). Vazio, nada muda. SMTP próprio por
+empresa fica para depois, se for pedido.
+
+No ambiente local, o Mailpit guarda todo e-mail enviado: http://127.0.0.1:8026.
+
 ## Tokens da API por empresa
 
 Todas as empresas usam o mesmo `API_JWT_KEY` do `.env`, e os ids de usuário e

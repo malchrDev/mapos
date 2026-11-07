@@ -19,11 +19,16 @@ if (! defined('BASEPATH')) {
  * ativo recebe 404 e banco mestre fora do ar recebe 503. Cair no DB_DATABASE
  * nesses casos serviria o mesmo banco a qualquer hostname.
  *
- * CLI e instalação única (DB_MASTER_DATABASE vazio) não passam por aqui.
+ * Instalação única (DB_MASTER_DATABASE vazio) não passa por aqui. Na linha de
+ * comando não há Host: um processo de empresa (tarefas agendadas, disparado por
+ * `tools tenants_tarefa`) leva o schema em MAPOS_TENANT_SCHEMA, e o resto da CLI
+ * (migrations, tools) segue no banco padrão.
  */
 function resolverTenant()
 {
     if (PHP_SAPI === 'cli') {
+        tenantResolverCli();
+
         return;
     }
 
@@ -76,13 +81,81 @@ function resolverTenant()
  * (a classe Hooks carrega o Config antes do pre_system), por isso o base_url
  * vai direto no objeto de config.
  */
-function tenantApontarBanco(string $banco, string $host): void
+/**
+ * Processo de linha de comando de uma empresa: MAPOS_TENANT_SCHEMA aponta o
+ * banco, a pasta de uploads e a chave dos tokens para ela. Schema que não é de
+ * empresa ativa encerra o processo (código 3; mestre fora do ar, 4) em vez de
+ * rodar a tarefa no banco padrão.
+ */
+function tenantResolverCli(): void
+{
+    $schema = trim((string) (getenv('MAPOS_TENANT_SCHEMA') ?: ''));
+    if ($schema === '' || isset($GLOBALS['mapos_tenant_resolvido'])) {
+        return;
+    }
+    $GLOBALS['mapos_tenant_resolvido'] = true;
+
+    $resultado = tenantResolverSchema($schema);
+    if ($resultado['status'] !== 'tenant') {
+        fwrite(STDERR, $resultado['status'] === 'indisponivel'
+            ? "Banco mestre indisponível; a tarefa não rodou.\n"
+            : "MAPOS_TENANT_SCHEMA não é de uma empresa ativa: {$schema}\n");
+
+        exit($resultado['status'] === 'indisponivel' ? 4 : 3);
+    }
+
+    tenantApontarBanco($schema, (string) $resultado['dominio'], tenantBaseUrlCli((string) $resultado['dominio']));
+    $GLOBALS['mapos_contexto'] = 'tenant';
+    $GLOBALS['mapos_tenant_schema'] = $schema;
+}
+
+/**
+ * Empresa ativa pelo schema (processos de linha de comando).
+ *
+ * @return array{status:string, dominio?:string}
+ */
+function tenantResolverSchema(string $schema): array
+{
+    if (trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? '')) === '' || ! preg_match('/^mapos_[a-z0-9_]{1,50}$/', $schema)) {
+        return ['status' => 'nao_encontrado'];
+    }
+
+    try {
+        $pdo = tenantConexaoMestre();
+        $stmt = $pdo->prepare(
+            'SELECT d.`dominio` FROM `tenants` t JOIN `tenant_dominios` d ON d.`tenant_id` = t.`id`'
+            . " WHERE t.`schema` = ? AND t.`status` = 'ativo' AND d.`verificado_em` IS NOT NULL"
+            . " ORDER BY d.`tipo` = 'plataforma' DESC, d.`id` LIMIT 1"
+        );
+        $stmt->execute([$schema]);
+        $dominio = $stmt->fetchColumn();
+    } catch (Throwable $erro) {
+        error_log('tenant: falha ao consultar o banco mestre: ' . $erro->getMessage());
+
+        return ['status' => 'indisponivel'];
+    }
+
+    return $dominio === false ? ['status' => 'nao_encontrado'] : ['status' => 'tenant', 'dominio' => (string) $dominio];
+}
+
+/**
+ * base_url de um processo de linha de comando: o domínio da empresa, com o
+ * esquema do APP_BASEURL (https se não houver).
+ */
+function tenantBaseUrlCli(string $dominio): string
+{
+    $esquema = parse_url((string) ($_ENV['APP_BASEURL'] ?? ''), PHP_URL_SCHEME) === 'http' ? 'http' : 'https';
+
+    return $esquema . '://' . $dominio . '/';
+}
+
+function tenantApontarBanco(string $banco, string $host, ?string $baseUrl = null): void
 {
     $_ENV['DB_DATABASE'] = $banco;
     $_SERVER['DB_DATABASE'] = $banco;
     putenv('DB_DATABASE=' . $banco);
 
-    $baseUrl = tenantBaseUrl($host);
+    $baseUrl ??= tenantBaseUrl($host);
     $_ENV['APP_BASEURL'] = $baseUrl;
     load_class('Config', 'core')->set_item('base_url', $baseUrl);
 }
@@ -185,23 +258,25 @@ function tenantResponder(int $status, string $titulo, string $mensagem): void
  *
  * @return array{id:int, dominio:string, schema:string, status:string, nome:string}|null
  */
-function tenantConsultarPorDominio(string $dominio): ?array
+/** Conexão PDO com o banco mestre (aqui ainda não existe o loader do CI). */
+function tenantConexaoMestre(): PDO
 {
-    $bancoMestre = trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? ''));
-    if ($bancoMestre === '') {
-        return null;
-    }
+    $dsn = 'mysql:host=' . ($_ENV['DB_HOSTNAME'] ?? 'localhost') . ';port=' . (int) ($_ENV['DB_PORT'] ?? 3306)
+        . ';dbname=' . trim((string) $_ENV['DB_MASTER_DATABASE']) . ';charset=utf8mb4';
 
-    $host = $_ENV['DB_HOSTNAME'] ?? 'localhost';
-    $usuario = $_ENV['DB_USERNAME'] ?? '';
-    $senha = $_ENV['DB_PASSWORD'] ?? '';
-    $porta = (int) ($_ENV['DB_PORT'] ?? 3306);
-
-    $dsn = 'mysql:host=' . $host . ';port=' . $porta . ';dbname=' . $bancoMestre . ';charset=utf8mb4';
-    $pdo = new PDO($dsn, $usuario, $senha, [
+    return new PDO($dsn, $_ENV['DB_USERNAME'] ?? '', $_ENV['DB_PASSWORD'] ?? '', [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_TIMEOUT => 3,
     ]);
+}
+
+function tenantConsultarPorDominio(string $dominio): ?array
+{
+    if (trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? '')) === '') {
+        return null;
+    }
+
+    $pdo = tenantConexaoMestre();
 
     // `schema` é palavra reservada do MySQL: sem crase, a consulta não compila.
     $stmt = $pdo->prepare(
