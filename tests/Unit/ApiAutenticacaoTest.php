@@ -40,6 +40,7 @@ final class ApiAutenticacaoTest extends MaposTestCase
     {
         JWT::$timestamp = null;
         JWT::$leeway = 0;
+        unset($GLOBALS['mapos_tenant_schema']);
 
         parent::tearDown();
     }
@@ -194,6 +195,62 @@ final class ApiAutenticacaoTest extends MaposTestCase
         $semAssinatura = rtrim(strtr(base64_encode('{"alg":"none","typ":"JWT"}'), '+/', '-_'), '=') . '.' . rtrim(strtr(base64_encode('{"uid":1,"exp":' . (time() + 100) . '}'), '+/', '-_'), '=') . '.';
         $this->assertFalse($autorizacao->validateToken($semAssinatura)['status']);
         $this->assertFalse($autorizacao->validateToken('lixo')['status']);
+    }
+
+    public function testTokenDeUmaEmpresaNaoValeEmOutraNemNaInstalacaoUnica(): void
+    {
+        $autorizacao = $this->autorizacao();
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja1_a1b2c3';
+        $daLoja1 = $autorizacao->generateToken(['uid' => 1, 'type' => 'client']);
+        $validado = $autorizacao->validateToken($daLoja1);
+        $this->assertTrue($validado['status'], 'Vale na própria empresa.');
+        $this->assertSame('mapos_loja1_a1b2c3', $validado['data']->ten);
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja2_d4e5f6';
+        $this->assertFalse($autorizacao->validateToken($daLoja1)['status'], 'Mesmo uid, outra empresa.');
+
+        unset($GLOBALS['mapos_tenant_schema']);
+        $this->assertFalse($autorizacao->validateToken($daLoja1)['status'], 'Token de empresa na instalação única.');
+    }
+
+    public function testEmpresaAssinaComChaveDerivadaERecusaTokenDaChaveComum(): void
+    {
+        $autorizacao = $this->autorizacao();
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja2_d4e5f6';
+        $token = $autorizacao->generateToken(['uid' => 1]);
+
+        try {
+            JWT::decode($token, new Key(self::CHAVE, 'HS256'));
+            $this->fail('O token da empresa não pode ser assinado com o API_JWT_KEY puro.');
+        } catch (\Firebase\JWT\SignatureInvalidException $e) {
+            $this->addToAssertionCount(1);
+        }
+
+        // Quem conhece só o API_JWT_KEY (ou tem um token antigo, sem `ten`) não
+        // forja um token da empresa, nem colocando a claim certa.
+        $forjado = JWT::encode(['uid' => 1, 'ten' => 'mapos_loja2_d4e5f6', 'exp' => time() + 100], self::CHAVE, 'HS256');
+        $this->assertFalse($autorizacao->validateToken($forjado)['status']);
+
+        unset($GLOBALS['mapos_tenant_schema']);
+        $daInstalacaoUnica = $autorizacao->generateToken(['uid' => 1]);
+        $this->assertObjectNotHasProperty('ten', JWT::decode($daInstalacaoUnica, new Key(self::CHAVE, 'HS256')), 'Instalação única segue igual.');
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja2_d4e5f6';
+        $this->assertFalse($autorizacao->validateToken($daInstalacaoUnica)['status'], 'Token da instalação única não vale numa empresa.');
+    }
+
+    public function testClaimTenDoChamadorNaoSobrescreveAEmpresa(): void
+    {
+        $autorizacao = $this->autorizacao();
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja1_a1b2c3';
+        $token = $autorizacao->generateToken(['uid' => 1, 'ten' => 'mapos_loja2_d4e5f6']);
+        $this->assertSame('mapos_loja1_a1b2c3', $autorizacao->validateToken($token)['data']->ten);
+
+        $GLOBALS['mapos_tenant_schema'] = '../x';
+        $this->assertFalse($autorizacao->validateToken($token)['status'], 'Schema inválido falha fechado.');
     }
 
     public function testRefreshTokenGuardaSoOHashEGiraACadaUso(): void

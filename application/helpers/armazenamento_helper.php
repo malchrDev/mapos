@@ -10,6 +10,8 @@
  * registros antigos com caminho absoluto em assets/ ainda são lidos até a
  * migration mover os arquivos.
  */
+require_once __DIR__ . '/tenant_helper.php';
+
 if (! defined('ARMAZENAMENTO_LIMITE_PADRAO_KB')) {
     define('ARMAZENAMENTO_LIMITE_PADRAO_KB', 10240);
 }
@@ -43,25 +45,13 @@ if (! function_exists('armazenamentoRaiz')) {
 
 if (! function_exists('armazenamentoTenant')) {
     /**
-     * Schema da empresa atendida agora (multi-tenancy), ou null na instalação
-     * única. O hook tenant.php grava o schema em $GLOBALS['mapos_tenant_schema'],
-     * e o Tenant_manager faz o mesmo enquanto roda as migrations de um tenant.
-     * Cada empresa tem a própria pasta dentro de STORAGE_PATH, e os caminhos no
-     * banco continuam relativos a ela. Um valor fora do padrão de nome de
-     * schema derruba a requisição em vez de cair na pasta comum.
+     * Schema da empresa atendida agora (tenantSchemaAtual()), ou null na
+     * instalação única. Cada empresa tem a própria pasta dentro de
+     * STORAGE_PATH, e os caminhos no banco continuam relativos a ela.
      */
     function armazenamentoTenant(): ?string
     {
-        $schema = $GLOBALS['mapos_tenant_schema'] ?? null;
-        if ($schema === null || $schema === '') {
-            return null;
-        }
-
-        if (! is_string($schema) || ! preg_match('/^[a-z0-9_]{1,64}$/', $schema)) {
-            throw new RuntimeException('Schema de tenant inválido para o armazenamento.');
-        }
-
-        return $schema;
+        return tenantSchemaAtual();
     }
 }
 

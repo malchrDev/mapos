@@ -206,6 +206,21 @@ a partir de `emitente.url_logo` e `usuarios.url_image_user` do schema.
 **Ao converter uma instalação única em tenant**, mova o conteúdo de
 `STORAGE_PATH` para `STORAGE_PATH/<schema>/`, mantendo as subpastas.
 
+## Tokens da API por empresa
+
+Todas as empresas usam o mesmo `API_JWT_KEY` do `.env`, e os ids de usuário e
+cliente se repetem entre elas (todo schema tem o usuário 1). Sem separação, um
+token da loja1 valia na loja2 como o usuário de mesmo id: o `sid` da sessão não
+barrava, porque `familiaAtiva()` só recusa sessão revogada, e o token da área do
+cliente nem tem `sid`.
+
+`Authorization_Token` assina com `HMAC-SHA256(API_JWT_KEY, schema)` e grava o
+schema na claim `ten`; na validação a assinatura e a claim precisam ser da
+empresa do Host. Token sem `ten` (da instalação única, ou anterior a esta
+mudança) não vale numa empresa. Os refresh tokens já ficavam no banco de cada
+empresa. O schema atual vem de `tenantSchemaAtual()` (`helpers/tenant_helper.php`),
+o mesmo que separa os uploads.
+
 ## Ambiente local (Docker)
 
 `docker/teste/` sobe MySQL 8.4, PHP-FPM 8.5 e nginx em `127.0.0.1:8090`. Os

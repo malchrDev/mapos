@@ -9,6 +9,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Security (2026-11-07, API)
+- Token da API preso à empresa: chave de assinatura derivada do `API_JWT_KEY` e do schema, e claim `ten`. Antes, o token do admin ou de um cliente da loja1 valia na loja2 como a conta de mesmo id (reproduzido pelo nginx: `200` com os clientes da loja2; agora `403`).
+
 ### Security (2026-11-07, uploads)
 - Uploads separados por empresa: anexos de OS, arquivos e o log de CSP ficam em `STORAGE_PATH/<schema>/` (`armazenamentoTenant()`, gravado pelo hook). Antes, todas as empresas gravavam na mesma pasta. Caminho que sobe para a pasta de outra empresa é recusado; schema fora do padrão derruba a requisição.
 - `Tenant_manager::migrarSchema()` roda as migrations com a pasta do tenant ativa; `pastaArmazenamento()` dá a pasta de uma empresa.

@@ -6,6 +6,8 @@ use Firebase\JWT\ExpiredException;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
+require_once __DIR__ . '/../helpers/tenant_helper.php';
+
 /**
  * Authorization_Token
  * ----------------------------------------------------------
@@ -18,6 +20,11 @@ use Firebase\JWT\Key;
  *
  * As permissões NÃO são lidas do token: o REST_Controller consulta o usuário e
  * a permissão no banco a cada requisição.
+ *
+ * Multi-tenancy: todas as empresas compartilham o API_JWT_KEY do .env, mas
+ * cada uma assina com uma chave derivada dele e do schema (chaveDeAssinatura()),
+ * e o token leva o schema na claim `ten`. Um token emitido em uma empresa não
+ * vale em outra, mesmo que o `uid` exista lá.
  */
 class Authorization_Token
 {
@@ -79,7 +86,26 @@ class Authorization_Token
         // Legado: apps e tokens anteriores à #2869 usam API_TIME.
         $data['API_TIME'] = $agora;
 
-        return JWT::encode($data, $this->token_key, $this->token_algorithm);
+        $schema = tenantSchemaAtual();
+        if ($schema !== null) {
+            $data['ten'] = $schema;
+        } else {
+            unset($data['ten']);
+        }
+
+        return JWT::encode($data, $this->chaveDeAssinatura($schema), $this->token_algorithm);
+    }
+
+    /**
+     * Chave HS256 da empresa atual: o API_JWT_KEY na instalação única e, com
+     * multi-tenancy, HMAC-SHA256(API_JWT_KEY, schema). Cada empresa tem uma
+     * chave diferente sem precisar guardar uma por empresa.
+     */
+    private function chaveDeAssinatura(?string $schema): string
+    {
+        $chave = (string) $this->token_key;
+
+        return $schema === null ? $chave : hash_hmac('sha256', 'mapos-api-jwt|' . $schema, $chave);
     }
 
     /**
@@ -147,13 +173,20 @@ class Authorization_Token
         JWT::$leeway = 0;
 
         try {
-            $token_decode = JWT::decode((string) $token, new Key($this->token_key, $this->token_algorithm));
+            $schema = tenantSchemaAtual();
+            $token_decode = JWT::decode((string) $token, new Key($this->chaveDeAssinatura($schema), $this->token_algorithm));
         } catch (ExpiredException $e) {
             return ['status' => false, 'message' => 'Token Time Expire.'];
         } catch (Throwable $e) {
             return ['status' => false, 'message' => $e->getMessage()];
         } finally {
             JWT::$leeway = $leewayAnterior;
+        }
+
+        // A assinatura já prende o token à empresa; a claim deixa isso explícito
+        // e recusa um token de empresa na instalação única (e vice-versa).
+        if (($token_decode->ten ?? null) !== $schema) {
+            return ['status' => false, 'message' => 'Token de outra empresa.'];
         }
 
         // Token novo: o exp já foi conferido pela biblioteca.
