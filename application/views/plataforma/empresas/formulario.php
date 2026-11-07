@@ -20,6 +20,11 @@ $campo = static fn (string $nome, array $props) => $props + [
     'error' => $errosDeCampo[$nome] ?? null,
 ];
 
+$opcoesPlano = ['' => 'Sem plano'];
+foreach ($planos as $p) {
+    $opcoesPlano[(string) $p['id']] = $p['nome'] . ' — ' . Catalogo_planos::precoLegivel($p);
+}
+
 $caixa = 'rounded-xl border border-border bg-surface p-4 sm:p-6';
 $grade = 'mt-4 grid gap-4 sm:grid-cols-2';
 ?>
@@ -59,12 +64,6 @@ $grade = 'mt-4 grid gap-4 sm:grid-cols-2';
             <h2 id="secao-plano" class="text-heading-sm text-text">Plano</h2>
             <p class="mt-1 text-caption text-muted">Pode ficar sem plano e ser definido depois, na tela da empresa.</p>
             <div class="<?= e($grade) ?>">
-                <?php
-                $opcoesPlano = ['' => 'Sem plano'];
-                foreach ($planos as $p) {
-                    $opcoesPlano[(string) $p['id']] = $p['nome'] . ' — ' . Catalogo_planos::precoLegivel($p);
-                }
-                ?>
                 <?= component('select', ['name' => 'plano_id', 'label' => 'Plano', 'options' => $opcoesPlano, 'selected' => (string) ($valores['plano_id'] ?? ''), 'error' => $errosDeCampo['plano_id'] ?? null]) ?>
             </div>
         </section>
