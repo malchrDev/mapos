@@ -8,7 +8,8 @@ defined('BASEPATH') or exit('No direct script access allowed');
  * Provisionamento e resolução de tenant (Fase 1 — multi-tenancy,
  * schema-per-tenant).
  *
- * O banco MESTRE (DB_MASTER_DATABASE) guarda `tenants` e `tenant_usage`:
+ * O banco MESTRE (DB_MASTER_DATABASE) guarda `tenants`, `tenant_dominios` e
+ * `tenant_usage`:
  * domínio -> schema, status, limites. Cada tenant tem seu próprio schema MySQL
  * no mesmo cluster; backup, restore e remoção total de dados (LGPD) são
  * operações de schema inteiro.
@@ -61,8 +62,47 @@ class Tenant_manager
     }
 
     /**
-     * Resolve o tenant ativo de um domínio (padrão: hostname da requisição).
-     * Retorna o registro de tenants ou null (não encontrado / suspenso).
+     * Domínio-base dos subdomínios da plataforma (SAAS_DOMINIO_BASE), ou ''.
+     */
+    public static function dominioBase(): string
+    {
+        return strtolower(trim((string) ($_ENV['SAAS_DOMINIO_BASE'] ?? ''), " .\t\n\r\0\x0B"));
+    }
+
+    /**
+     * Hostname do painel administrativo da plataforma (SAAS_PAINEL_HOST), ou ''.
+     */
+    public static function hostPainel(): string
+    {
+        return strtolower(trim((string) ($_ENV['SAAS_PAINEL_HOST'] ?? '')));
+    }
+
+    /**
+     * Domínio em minúsculas e sem espaços, ou exceção se não for um hostname.
+     */
+    public static function normalizarDominio(string $dominio): string
+    {
+        $dominio = strtolower(trim($dominio));
+        if ($dominio === '' || ! str_contains($dominio, '.') || filter_var($dominio, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            throw new InvalidArgumentException("Domínio inválido: {$dominio}.");
+        }
+
+        return $dominio;
+    }
+
+    /**
+     * 'plataforma' para subdomínio de SAAS_DOMINIO_BASE, 'proprio' para o resto.
+     */
+    public static function tipoDominio(string $dominio): string
+    {
+        $base = self::dominioBase();
+
+        return $base !== '' && str_ends_with($dominio, '.' . $base) ? 'plataforma' : 'proprio';
+    }
+
+    /**
+     * Resolve o tenant ativo de um domínio verificado (padrão: hostname da
+     * requisição). Retorna tenants.* + dominio, ou null.
      */
     public function resolverPorDominio(?string $dominio = null): ?array
     {
@@ -71,26 +111,132 @@ class Tenant_manager
             $dominio = preg_replace('/:\d+$/', '', $dominio); // remove porta
         }
 
-        $registro = $this->mestre()
-            ->where('dominio', strtolower($dominio))
-            ->where('status', 'ativo')
-            ->get('tenants')
+        $registro = $this->consultaTenantPorDominio(strtolower($dominio))
+            ->where('d.verificado_em IS NOT NULL', null, false)
+            ->where('t.status', 'ativo')
+            ->get()
             ->row_array();
 
         return $registro ?: null;
     }
 
     /**
-     * Registro de tenants do domínio, em qualquer status.
+     * Tenant dono do domínio, em qualquer status e verificado ou não.
      */
     public function buscarPorDominio(string $dominio): ?array
     {
-        $registro = $this->mestre()
-            ->where('dominio', strtolower(trim($dominio)))
-            ->get('tenants')
-            ->row_array();
+        $registro = $this->consultaTenantPorDominio(strtolower(trim($dominio)))->get()->row_array();
 
         return $registro ?: null;
+    }
+
+    /** @return object Query Builder do mestre já com o JOIN e o filtro de domínio */
+    private function consultaTenantPorDominio(string $dominio)
+    {
+        return $this->mestre()
+            ->select('t.*, d.dominio, d.tipo AS dominio_tipo, d.verificado_em')
+            ->from('tenant_dominios d')
+            ->join('tenants t', 't.id = d.tenant_id')
+            ->where('d.dominio', $dominio);
+    }
+
+    /**
+     * Domínios de um tenant.
+     */
+    public function dominios(int $tenantId): array
+    {
+        return $this->mestre()->where('tenant_id', $tenantId)->order_by('id')->get('tenant_dominios')->result_array();
+    }
+
+    /**
+     * Cadastra um domínio próprio do cliente, ainda não verificado. Devolve o
+     * registro TXT que o cliente precisa publicar para provar que é o dono.
+     *
+     * @return array{nome:string, valor:string}
+     */
+    public function adicionarDominio(int $tenantId, string $dominio): array
+    {
+        $dominio = self::normalizarDominio($dominio);
+        $this->recusarDominioReservado($dominio);
+
+        if (self::tipoDominio($dominio) === 'plataforma') {
+            throw new InvalidArgumentException('Subdomínio da plataforma não é cadastrado como domínio próprio.');
+        }
+        if ($this->buscarPorDominio($dominio) !== null) {
+            throw new RuntimeException("O domínio {$dominio} já está cadastrado.");
+        }
+        if (! $this->mestre()->where('id', $tenantId)->count_all_results('tenants')) {
+            throw new RuntimeException("Tenant {$tenantId} não existe.");
+        }
+
+        $token = bin2hex(random_bytes(16));
+        $ok = $this->mestre()->insert('tenant_dominios', [
+            'tenant_id' => $tenantId,
+            'dominio' => $dominio,
+            'tipo' => 'proprio',
+            'verificacao_token' => $token,
+            'verificado_em' => null,
+            'criado_em' => date('Y-m-d H:i:s'),
+        ]);
+        if (! $ok) {
+            throw new RuntimeException('Não foi possível cadastrar o domínio: ' . ($this->mestre()->error()['message'] ?? ''));
+        }
+
+        return self::registroVerificacao($dominio, $token);
+    }
+
+    /**
+     * Registro TXT que prova a posse de um domínio próprio.
+     *
+     * @return array{nome:string, valor:string}
+     */
+    public static function registroVerificacao(string $dominio, string $token): array
+    {
+        return ['nome' => '_mapos-verificacao.' . $dominio, 'valor' => 'mapos-verificacao=' . $token];
+    }
+
+    /**
+     * Confere o TXT do domínio próprio e, se bater, marca como verificado — a
+     * partir daí o hook passa a resolvê-lo.
+     *
+     * @param  callable|null  $consultarTxt  fn(string $nome): string[] (padrão: DNS real)
+     */
+    public function verificarDominio(string $dominio, ?callable $consultarTxt = null): bool
+    {
+        $dominio = self::normalizarDominio($dominio);
+        $registro = $this->mestre()->where('dominio', $dominio)->get('tenant_dominios')->row_array();
+        if (! $registro) {
+            throw new RuntimeException("O domínio {$dominio} não está cadastrado.");
+        }
+        if ($registro['verificado_em'] !== null) {
+            return true;
+        }
+
+        $consultarTxt ??= static function (string $nome): array {
+            $registros = @dns_get_record($nome, DNS_TXT) ?: [];
+
+            return array_map(static fn ($r) => (string) ($r['txt'] ?? ''), $registros);
+        };
+
+        $esperado = self::registroVerificacao($dominio, (string) $registro['verificacao_token']);
+        if (! in_array($esperado['valor'], $consultarTxt($esperado['nome']), true)) {
+            return false;
+        }
+
+        $this->mestre()->where('id', $registro['id'])->update('tenant_dominios', ['verificado_em' => date('Y-m-d H:i:s')]);
+
+        return true;
+    }
+
+    /**
+     * Hostnames que nunca podem ser de um tenant.
+     */
+    private function recusarDominioReservado(string $dominio): void
+    {
+        $reservados = array_filter([self::hostPainel(), self::dominioBase()]);
+        if (in_array($dominio, $reservados, true)) {
+            throw new InvalidArgumentException("O domínio {$dominio} é reservado da plataforma.");
+        }
     }
 
     /**
@@ -214,48 +360,80 @@ class Tenant_manager
      * registro no mestre), e só então o INSERT em tenants — sem o qual nenhuma
      * requisição resolve o tenant, então o schema órfão não vaza acesso.
      *
-     * @param  array{nome:string, documento?:string, dominio:string, limites?:array, data_expiracao?:string}  $dados
+     * O domínio informado é o de plataforma (`loja.SAAS_DOMINIO_BASE`) e nasce
+     * verificado; domínios próprios entram depois, por adicionarDominio().
+     *
+     * O admin do tenant nasce com o e-mail do pedido e uma senha aleatória, que
+     * só existe no retorno — o chamador a entrega (e-mail de boas-vindas na
+     * Fase 5; na tela do CLI enquanto isso).
+     *
+     * @param  array{nome:string, dominio:string, admin_email:string, admin_nome?:string, documento?:string, limites?:array, data_expiracao?:string}  $dados
+     * @return array{id:int, schema:string, admin_email:string, admin_senha:string}
      */
-    public function provisionar(array $dados): int
+    public function provisionar(array $dados): array
     {
-        $dominio = strtolower(trim($dados['dominio']));
-        if ($dominio === '' || filter_var($dominio, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw new InvalidArgumentException('Domínio do tenant inválido.');
+        $dominio = self::normalizarDominio($dados['dominio']);
+        $this->recusarDominioReservado($dominio);
+        if (self::dominioBase() !== '' && self::tipoDominio($dominio) !== 'plataforma') {
+            throw new InvalidArgumentException('O domínio do provisionamento precisa ser um subdomínio de ' . self::dominioBase() . '; domínio próprio entra depois, com verificação.');
         }
         if (trim($dados['nome']) === '') {
             throw new InvalidArgumentException('O nome do tenant é obrigatório.');
         }
+        $email = strtolower(trim($dados['admin_email']));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('E-mail do administrador inválido.');
+        }
 
         // Qualquer status: um domínio suspenso ou cancelado continua reservado,
-        // e o UNIQUE de tenants.dominio recusaria o INSERT de qualquer forma —
+        // e o UNIQUE de tenant_dominios recusaria o INSERT de qualquer forma —
         // só que depois de o schema já ter sido criado.
         if ($this->buscarPorDominio($dominio) !== null) {
             throw new RuntimeException("Já existe um tenant no domínio {$dominio}.");
         }
 
         $schema = self::gerarNomeSchema($dominio);
+        $senha = self::gerarSenha();
 
         $this->criarSchema($schema);
 
         try {
             $this->migrarSchema($schema);
+            $this->gravarDadosIniciais($schema, [
+                'nome' => trim((string) ($dados['admin_nome'] ?? '')) ?: 'Administrador',
+                'email' => $email,
+                'senha' => $senha,
+            ]);
 
+            $agora = date('Y-m-d H:i:s');
             $mestre = $this->mestre();
-            $ok = $mestre->insert('tenants', [
-                'dominio' => $dominio,
+            $mestre->trans_begin();
+            $mestre->insert('tenants', [
                 'nome' => $dados['nome'],
                 'documento' => $dados['documento'] ?? null,
                 'schema' => $schema,
                 'status' => 'ativo',
                 'limites' => isset($dados['limites']) ? json_encode($dados['limites'], JSON_UNESCAPED_UNICODE) : null,
                 'data_expiracao' => $dados['data_expiracao'] ?? null,
-                'criado_em' => date('Y-m-d H:i:s'),
+                'criado_em' => $agora,
             ]);
-            $id = $ok ? (int) $mestre->insert_id() : 0;
+            $id = (int) $mestre->insert_id();
+            $mestre->insert('tenant_dominios', [
+                'tenant_id' => $id,
+                'dominio' => $dominio,
+                'tipo' => 'plataforma',
+                'verificacao_token' => null,
+                'verificado_em' => $agora,
+                'criado_em' => $agora,
+            ]);
 
-            if ($id === 0) {
-                throw new RuntimeException('Não foi possível gravar o tenant no banco mestre: ' . ($mestre->error()['message'] ?? ''));
+            if ($id === 0 || $mestre->trans_status() === false) {
+                $erro = $mestre->error()['message'] ?? '';
+                $mestre->trans_rollback();
+
+                throw new RuntimeException('Não foi possível gravar o tenant no banco mestre: ' . $erro);
             }
+            $mestre->trans_commit();
         } catch (Throwable $e) {
             // Schema sem registro no mestre é inalcançável por qualquer requisição:
             // removê-lo evita acumular lixo no cluster a cada tentativa que falhou.
@@ -264,7 +442,62 @@ class Tenant_manager
             throw $e;
         }
 
-        return $id;
+        return ['id' => $id, 'schema' => $schema, 'admin_email' => $email, 'admin_senha' => $senha];
+    }
+
+    /**
+     * Senha inicial do admin: 18 caracteres de base64 url-safe (108 bits).
+     */
+    public static function gerarSenha(): string
+    {
+        return rtrim(strtr(base64_encode(random_bytes(14)), '+/', '-_'), '=');
+    }
+
+    /**
+     * O que uma instalação nova ganha do instalador (banco.sql) e as migrations
+     * não criam: configurações padrão, o perfil Administrador e o usuário admin.
+     *
+     * @param  array{nome:string, email:string, senha:string}  $admin
+     */
+    protected function gravarDadosIniciais(string $schema, array $admin): void
+    {
+        $this->CI->config->load('tenant_dados_iniciais', false, false);
+        $dados = $this->CI->config->item('tenant_dados_iniciais');
+        $db = $this->conexao($schema);
+
+        try {
+            // INSERT IGNORE: algumas migrations já gravam a própria configuração.
+            foreach ($dados['configuracoes'] as $config => $valor) {
+                $this->executar($db, 'INSERT IGNORE INTO configuracoes (config, valor) VALUES (?, ?)', [$config, $valor]);
+            }
+
+            if (! $db->insert('permissoes', [
+                'nome' => 'Administrador',
+                'permissoes' => serialize($dados['permissoes_admin']),
+                'situacao' => 1,
+                'data' => date('Y-m-d'),
+            ])) {
+                throw new RuntimeException('Não foi possível criar o perfil Administrador: ' . ($db->error()['message'] ?? ''));
+            }
+            $perfil = (int) $db->insert_id();
+
+            if (! $db->insert('usuarios', [
+                'nome' => $admin['nome'],
+                'cpf' => '',
+                'cep' => '',
+                'email' => $admin['email'],
+                'senha' => password_hash($admin['senha'], PASSWORD_DEFAULT),
+                'telefone' => '',
+                'situacao' => 1,
+                'dataCadastro' => date('Y-m-d'),
+                'permissoes_id' => $perfil,
+                'dataExpiracao' => null,
+            ])) {
+                throw new RuntimeException('Não foi possível criar o usuário administrador: ' . ($db->error()['message'] ?? ''));
+            }
+        } finally {
+            $db->close();
+        }
     }
 
     /**
@@ -409,9 +642,9 @@ class Tenant_manager
     /**
      * Query que não pode falhar em silêncio.
      */
-    protected function executar($conexao, string $sql): void
+    protected function executar($conexao, string $sql, array $binds = []): void
     {
-        if ($conexao->query($sql) === false) {
+        if ($conexao->query($sql, $binds ?: false) === false) {
             $erro = $conexao->error();
 
             throw new RuntimeException('Erro de banco: ' . ($erro['message'] ?? 'desconhecido'));

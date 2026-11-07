@@ -18,7 +18,7 @@ define('ENVIRONMENT', 'testing');
 require APPPATH . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
 
 // Sem Dotenv: o ambiente vem do container (docker/teste/docker-compose.yml).
-foreach (['DB_HOSTNAME', 'DB_PORT', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE', 'DB_MASTER_DATABASE'] as $variavel) {
+foreach (['DB_HOSTNAME', 'DB_PORT', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE', 'DB_MASTER_DATABASE', 'SAAS_DOMINIO_BASE', 'SAAS_PAINEL_HOST'] as $variavel) {
     $valor = getenv($variavel);
     if ($valor !== false) {
         $_ENV[$variavel] = $valor;
@@ -98,6 +98,15 @@ final class IntegracaoLoader
     }
 }
 
+/** Conteúdo de application/config/tenant_dados_iniciais.php. */
+function integracaoDadosIniciais(): array
+{
+    $config = [];
+    require APPPATH . 'config/tenant_dados_iniciais.php';
+
+    return $config['tenant_dados_iniciais'];
+}
+
 /** Grupo `default` como o config/database.php monta, para o banco informado. */
 function integracaoConfigBanco(string $banco): array
 {
@@ -149,10 +158,22 @@ final class IntegracaoCI
     {
         $this->load = new IntegracaoLoader();
         $this->lang = new IntegracaoLang();
+        // O que o CI_Config faz com application/config/<arquivo>.php.
         $this->config = new class() {
+            private array $itens = [];
+
+            public function load($arquivo, $secoes = false, $falharEmSilencio = false)
+            {
+                $config = [];
+                require APPPATH . 'config/' . $arquivo . '.php';
+                $this->itens = array_merge($this->itens, $config);
+
+                return true;
+            }
+
             public function item($chave)
             {
-                return null;
+                return $this->itens[$chave] ?? null;
             }
         };
     }

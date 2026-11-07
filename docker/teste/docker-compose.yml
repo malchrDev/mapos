@@ -1,17 +1,30 @@
-# Ambiente de testes de integração (multi-tenancy contra MySQL real).
+# Ambiente local de multi-tenancy: MySQL + Map-OS no navegador + testes de
+# integração. Nada aqui é para produção — senhas fixas, portas só em 127.0.0.1.
 #
-# Uso (a partir da raiz do projeto):
-#   docker compose -f docker/teste/docker-compose.yml up -d --build --wait mysql
-#   docker compose -f docker/teste/docker-compose.yml run --rm php
-#   docker compose -f docker/teste/docker-compose.yml down -v
+# Subir o sistema (a partir da raiz do projeto):
+#   docker compose -f docker/teste/docker-compose.yml up -d --build --wait
+#   docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_mestre
+#   docker compose -f docker/teste/docker-compose.yml exec web php index.php tools tenant_criar loja1.localhost "Loja%201" admin@loja1.com
+#   -> abrir http://loja1.localhost:8090
 #
-# O MySQL roda em tmpfs: cada `up` começa de banco vazio. Nada aqui é para
-# produção — senhas fixas e porta só em 127.0.0.1.
+# Testes de integração (usam bancos próprios, não mexem nos tenants acima):
+#   docker compose -f docker/teste/docker-compose.yml run --rm testes
+#
+# Parar: `down` (mantém os dados) · apagar tudo: `down -v`.
 name: mapos-teste
 
 services:
   mysql:
     image: mysql:8.4
+    # Só ambiente local: sem fsync por transação nem binlog. Provisionar um
+    # tenant roda 40+ migrations (DDL), e com fsync no volume do Docker Desktop
+    # cada uma leva segundos. Uma queda do container pode perder o último
+    # segundo de escrita — aceitável aqui, nunca em produção.
+    command:
+      - --innodb-flush-log-at-trx-commit=0
+      - --sync-binlog=0
+      - --skip-log-bin
+      - --innodb-doublewrite=OFF
     environment:
       MYSQL_ROOT_PASSWORD: root_teste
       MYSQL_DATABASE: mapos_master
@@ -19,17 +32,62 @@ services:
       MYSQL_PASSWORD: mapos_teste
     volumes:
       - "./mysql-init.sql:/docker-entrypoint-initdb.d/01-mapos.sql:ro"
-    tmpfs:
-      - /var/lib/mysql
+      - "mysql-dados:/var/lib/mysql"
     ports:
       - "127.0.0.1:33306:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-umapos", "-pmapos_teste"]
       interval: 3s
       timeout: 3s
-      retries: 30
+      retries: 40
 
-  php:
+  # PHP-FPM servindo o código do projeto (montado, sem cópia: editar e recarregar).
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    working_dir: /app
+    volumes:
+      - "../../:/app"
+      - "storage:/storage"
+    env_file:
+      - "./web.env"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - "./nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+      - "../../:/app:ro"
+    ports:
+      - "127.0.0.1:8090:80"
+    depends_on:
+      - web
+
+  # MySQL só dos testes, em memória: as migrations de cada tenant são centenas de
+  # DDL, e num volume do Docker Desktop cada uma custa ~50 ms. Recriado a cada
+  # `run`, não toca nos tenants do ambiente do navegador.
+  mysql-testes:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root_teste
+      MYSQL_DATABASE: mapos_teste_master
+      MYSQL_USER: mapos
+      MYSQL_PASSWORD: mapos_teste
+    volumes:
+      - "./mysql-init.sql:/docker-entrypoint-initdb.d/01-mapos.sql:ro"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-umapos", "-pmapos_teste"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    profiles: ["testes"]
+
+  testes:
     build:
       context: .
       dockerfile: Dockerfile
@@ -37,13 +95,20 @@ services:
     volumes:
       - "../../:/app"
     environment:
-      DB_HOSTNAME: mysql
+      DB_HOSTNAME: mysql-testes
       DB_PORT: "3306"
       DB_USERNAME: mapos
       DB_PASSWORD: mapos_teste
-      DB_DATABASE: mapos_padrao
-      DB_MASTER_DATABASE: mapos_master
+      DB_DATABASE: mapos_teste_padrao
+      DB_MASTER_DATABASE: mapos_teste_master
+      SAAS_DOMINIO_BASE: teste.local
+      SAAS_PAINEL_HOST: painel.teste.local
     depends_on:
-      mysql:
+      mysql-testes:
         condition: service_healthy
+    profiles: ["testes"]
     command: ["php", "application/vendor/bin/phpunit", "-c", "phpunit.integracao.xml"]
+
+volumes:
+  mysql-dados:
+  storage:

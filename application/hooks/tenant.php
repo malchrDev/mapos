@@ -15,8 +15,11 @@ if (! defined('BASEPATH')) {
  * config/database.php lê para montar a conexão 'default'. Assim nenhum modelo
  * precisa saber que multi-tenancy existe: a conexão já nasce no schema certo.
  *
- * Sem tenant resolvido (CLI, instalador, migração, ambiente ainda não
- * provisionado) a função não faz nada: o banco continua sendo o configurado.
+ * Com a multi-tenancy ligada, a requisição **falha fechada**: Host sem tenant
+ * ativo recebe 404 e banco mestre fora do ar recebe 503. Cair no DB_DATABASE
+ * nesses casos serviria o mesmo banco a qualquer hostname.
+ *
+ * CLI e instalação única (DB_MASTER_DATABASE vazio) não passam por aqui.
  */
 function resolverTenant()
 {
@@ -31,60 +34,140 @@ function resolverTenant()
     }
     $GLOBALS['mapos_tenant_resolvido'] = true;
 
-    $schema = tenantSchemaDoHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+    $resultado = tenantResolverHost($host);
 
-    if ($schema !== null) {
-        $_ENV['DB_DATABASE'] = $schema;
-        $_SERVER['DB_DATABASE'] = $schema;
-        putenv('DB_DATABASE=' . $schema);
+    switch ($resultado['status']) {
+        case 'desligado':
+            return;
+
+        case 'tenant':
+            $schema = $resultado['schema'];
+            $_ENV['DB_DATABASE'] = $schema;
+            $_SERVER['DB_DATABASE'] = $schema;
+            putenv('DB_DATABASE=' . $schema);
+
+            // Um tenant atende por vários hostnames: os links precisam sair no
+            // hostname pedido, não no APP_BASEURL fixo. O Host já foi conferido
+            // contra tenant_dominios, então não é cabeçalho arbitrário.
+            // config.php já foi lido (a classe Hooks carrega o Config antes do
+            // pre_system), por isso o valor vai direto no objeto de config.
+            $baseUrl = tenantBaseUrl($host);
+            $_ENV['APP_BASEURL'] = $baseUrl;
+            load_class('Config', 'core')->set_item('base_url', $baseUrl);
+
+            return;
+
+        case 'painel':
+            // O painel administrativo da plataforma ainda não existe (próxima
+            // etapa); o hostname já fica reservado e nunca serve um tenant.
+            tenantResponder(503, 'Painel administrativo', 'O painel administrativo da plataforma ainda não está disponível.');
+
+            // no break
+        case 'indisponivel':
+            tenantResponder(503, 'Serviço indisponível', 'Não foi possível acessar o sistema agora. Tente novamente em alguns minutos.');
+
+            // no break
+        default:
+            tenantResponder(404, 'Endereço não encontrado', 'Nenhuma conta ativa responde por este endereço.');
     }
 }
 
 /**
- * Schema do tenant ativo para o cabeçalho Host informado, ou null.
+ * O que fazer com uma requisição para o Host informado.
  *
- * Separada de resolverTenant() para poder ser exercitada fora de uma
- * requisição web (testes de integração).
+ * - desligado: multi-tenancy desligada (DB_MASTER_DATABASE vazio), segue normal;
+ * - tenant: Host de um tenant ativo, com o schema dele;
+ * - painel: hostname do painel administrativo (SAAS_PAINEL_HOST);
+ * - nao_encontrado: Host inválido ou sem tenant ativo e verificado;
+ * - indisponivel: o banco mestre não respondeu.
+ *
+ * Separada de resolverTenant() para ser exercitada fora de uma requisição web.
+ *
+ * @return array{status:string, schema?:string}
  */
-function tenantSchemaDoHost(string $host): ?string
+function tenantResolverHost(string $host): array
 {
-    // DB_MASTER_DATABASE vazio ou ausente desliga a multi-tenancy. Sem
-    // fallback para DB_DATABASE: numa instalação única isso abriria uma
+    // Sem fallback para DB_DATABASE: numa instalação única isso abriria uma
     // conexão a mais por requisição, só para falhar ao procurar `tenants`.
     if (trim((string) ($_ENV['DB_MASTER_DATABASE'] ?? '')) === '') {
-        return null;
+        return ['status' => 'desligado'];
     }
 
     $dominio = strtolower($host);
     $dominio = preg_replace('/:\d+$/', '', $dominio); // remove a porta, se vier com ela
 
-    // Host é cabeçalho do cliente. Só hostname válido é consultado: o valor vai
-    // para um statement parametrizado, mas restringir aqui evita consulta
-    // inútil no banco mestre com hostname fora do padrão.
+    // Host é cabeçalho do cliente. Só hostname válido é consultado.
     if ($dominio === '' || filter_var($dominio, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-        return null;
+        return ['status' => 'nao_encontrado'];
+    }
+
+    $painel = strtolower(trim((string) ($_ENV['SAAS_PAINEL_HOST'] ?? '')));
+    if ($painel !== '' && $dominio === $painel) {
+        return ['status' => 'painel'];
     }
 
     try {
         $tenant = tenantConsultarPorDominio($dominio);
     } catch (Throwable $e) {
-        // Banco mestre fora do ar não pode derrubar a aplicação inteira antes
-        // mesmo do framework: segue com o schema configurado e deixa o erro
-        // aparecer na tela normal de falha de banco. Fica registrado no log do
-        // PHP — sem isso, um erro de SQL aqui seria invisível.
+        // Fica no log do PHP: sem isso, um erro de SQL aqui seria invisível.
         error_log('mapos tenant: falha ao consultar o banco mestre: ' . $e->getMessage());
 
-        return null;
+        return ['status' => 'indisponivel'];
     }
 
-    return $tenant['schema'] ?? null;
+    if ($tenant === null) {
+        return ['status' => 'nao_encontrado'];
+    }
+
+    return ['status' => 'tenant', 'schema' => $tenant['schema']];
 }
 
 /**
- * Uma linha de tenants (banco mestre) para o domínio informado, ou null.
+ * Schema do tenant ativo para o Host, ou null (atalho de tenantResolverHost).
+ */
+function tenantSchemaDoHost(string $host): ?string
+{
+    $resultado = tenantResolverHost($host);
+
+    return $resultado['status'] === 'tenant' ? $resultado['schema'] : null;
+}
+
+/**
+ * base_url para o hostname pedido, preservando a porta e a subpasta do
+ * index.php. HTTPS só quando o próprio servidor diz que é (`$_SERVER['HTTPS']`).
+ */
+function tenantBaseUrl(string $host): string
+{
+    $esquema = ! empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off' ? 'https' : 'http';
+    $pasta = rtrim(str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
+
+    return $esquema . '://' . strtolower($host) . $pasta . '/';
+}
+
+/**
+ * Responde e encerra antes do framework (não há views nem loader ainda).
+ */
+function tenantResponder(int $status, string $titulo, string $mensagem): void
+{
+    http_response_code($status);
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+
+    $titulo = htmlspecialchars($titulo, ENT_QUOTES, 'UTF-8');
+    $mensagem = htmlspecialchars($mensagem, ENT_QUOTES, 'UTF-8');
+
+    exit('<!DOCTYPE html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<title>' . $titulo . '</title></head>'
+        . '<body style="font-family:sans-serif;max-width:36rem;margin:4rem auto;padding:0 1rem;line-height:1.5">'
+        . '<h1 style="font-size:1.25rem">' . $titulo . '</h1><p>' . $mensagem . '</p></body></html>');
+}
+
+/**
+ * Tenant ativo dono de um domínio verificado, ou null.
  *
  * Só tenant 'ativo' é devolvido: suspenso e cancelado continuam sem acesso,
- * mesmo que o schema ainda exista.
+ * mesmo que o schema ainda exista. Domínio próprio sem verificação também não.
  *
  * @return array{id:int, dominio:string, schema:string, status:string, nome:string}|null
  */
@@ -107,7 +190,11 @@ function tenantConsultarPorDominio(string $dominio): ?array
     ]);
 
     // `schema` é palavra reservada do MySQL: sem crase, a consulta não compila.
-    $stmt = $pdo->prepare('SELECT `id`, `dominio`, `nome`, `schema`, `status` FROM `tenants` WHERE `dominio` = ? AND `status` = ? LIMIT 1');
+    $stmt = $pdo->prepare(
+        'SELECT t.`id`, d.`dominio`, t.`nome`, t.`schema`, t.`status`'
+        . ' FROM `tenant_dominios` d JOIN `tenants` t ON t.`id` = d.`tenant_id`'
+        . ' WHERE d.`dominio` = ? AND d.`verificado_em` IS NOT NULL AND t.`status` = ? LIMIT 1'
+    );
     $stmt->execute([$dominio, 'ativo']);
     $linha = $stmt->fetch(PDO::FETCH_ASSOC);
 

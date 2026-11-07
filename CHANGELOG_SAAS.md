@@ -9,6 +9,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07 — tarde)
+- `tenant_dominios` (migration do mestre `20261107000000`): vários domínios por tenant — subdomínio de plataforma (verificado no provisionamento) e domínios próprios com verificação por TXT no DNS. `tenants.dominio` migra para a tabela nova; rollback devolve.
+- Provisionamento cria configurações padrão, o perfil Administrador (iguais a `banco.sql`, conferidos por `TenantDadosIniciaisTest`) e o usuário admin com o e-mail do pedido e senha aleatória.
+- CLI: `tools tenant_dominio`, `tools tenant_verificar`; `tools tenant_criar` recebe o e-mail do admin.
+- `.env`: `SAAS_DOMINIO_BASE`, `SAAS_PAINEL_HOST`.
+- `docker/teste/`: ambiente local no navegador (nginx + PHP-FPM 8.5 em `127.0.0.1:8090`, `*.localhost`) e MySQL de testes em memória separado.
+
+### Security (2026-11-07 — tarde)
+- Hook falha fechado com multi-tenancy ligada: Host desconhecido, inválido, de tenant suspenso ou domínio próprio não verificado → 404; mestre fora do ar → 503. Antes caía no `DB_DATABASE`.
+- `base_url` derivado do Host já conferido contra `tenant_dominios` (antes era o `APP_BASEURL` fixo para todos os tenants).
+
 ### Fixed (2026-11-07 — testado contra MySQL real)
 - `application/hooks/tenant.php`: coluna `schema` (palavra reservada) entre crases — a consulta falhava em silêncio e todo tenant caía no banco padrão.
 - `application/hooks/tenant.php`: `DB_MASTER_DATABASE` ausente não cai mais para `DB_DATABASE`; falha ao consultar o mestre vai para o `error_log`.

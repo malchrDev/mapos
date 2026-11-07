@@ -1,0 +1,11 @@
+# PHP-FPM da versão exigida pelo projeto (^8.5) para o ambiente local.
+# A imagem oficial já roda o FPM com clear_env = no: as variáveis de web.env
+# chegam ao $_ENV, sem precisar de application/.env.
+FROM php:8.5-fpm-bookworm
+
+COPY --from=ghcr.io/mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+
+RUN install-php-extensions mysqli pdo_mysql intl gd zip bcmath opcache
+
+# Uploads (STORAGE_PATH) num volume gravável pelo FPM.
+RUN mkdir -p /storage && chown www-data:www-data /storage

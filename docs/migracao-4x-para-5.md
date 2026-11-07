@@ -123,8 +123,12 @@ sempre.
 
 Se você for provisionar tenants, veja
 [multi-tenancy.md](multi-tenancy.md): `DB_MASTER_DATABASE` precisa ser um banco
-**diferente** dos schemas dos tenants, e as migrations `create_tenants` e
-`create_tenant_usage` rodam no banco mestre, não no schema do tenant.
+**diferente** dos schemas dos tenants, `SAAS_DOMINIO_BASE` e `SAAS_PAINEL_HOST`
+definem os subdomínios e o hostname do painel, e as migrations do banco mestre
+(`application/database/migrations_mestre/`) rodam com
+`php index.php tools tenant_mestre`, nunca no schema do tenant. Com a variável
+preenchida, Host sem tenant recebe 404 — a instalação deixa de responder pelo
+`DB_DATABASE` na web.
 
 ### 3.5. Defina o `STORAGE_PATH` e rode as migrations
 
