@@ -244,6 +244,20 @@ function config_item($item)
 
 // CI_Email é a classe que MY_Email estende. Vazia porque o PHPStan só precisa
 // que o nome exista paraMY_Email resolver.
+class CI_Log
+{
+    /**
+     * @param  string  $level
+     * @param  string  $date
+     * @param  string  $message
+     * @return string
+     */
+    protected function _format_line($level, $date, $message)
+    {
+        return $level . ' - ' . $date . ' --> ' . $message . PHP_EOL;
+    }
+}
+
 class CI_Email
 {
     public function __construct()

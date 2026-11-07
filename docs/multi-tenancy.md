@@ -309,6 +309,24 @@ empresa fica para depois, se for pedido.
 
 No ambiente local, o Mailpit guarda todo e-mail enviado: http://127.0.0.1:8026.
 
+**Rode o cron com o usuário do servidor web** (por exemplo `www-data`), não
+como root. O arquivo de log do dia nasce com o dono de quem escreve primeiro;
+criado pelo root, o PHP-FPM não consegue mais escrever nele e os erros das
+telas somem do log até o dia seguinte.
+
+## Logs
+
+Todas as empresas escrevem em `application/logs`. `application/core/MY_Log.php`
+põe a empresa no começo de cada linha, para saber de qual é um erro (e separar
+o que é de uma empresa num pedido de dados):
+
+```
+ERROR - 2026-11-07 20:08:57 --> [mapos_loja2_3a09fa] 404 Page Not Found: ...
+ERROR - 2026-11-07 20:08:56 --> [plataforma] ...
+```
+
+Na instalação única a linha fica como sempre foi.
+
 ## Tokens da API por empresa
 
 Todas as empresas usam o mesmo `API_JWT_KEY` do `.env`, e os ids de usuário e

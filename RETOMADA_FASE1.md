@@ -46,8 +46,8 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
 2. ~~JWT da API vinculado ao tenant~~ feito em 2026-11-07 (chave derivada por schema + claim `ten`).
 3. ~~Tarefas agendadas por tenant~~ feito em 2026-11-07: `tools tenants_tarefa`
    (fila de e-mails), hook na CLI por `MAPOS_TENANT_SCHEMA`,
-   `SAAS_EMAIL_REMETENTE`. Pendente: os logs (`application/logs`) ainda
-   misturam as empresas, sem indicar de qual é cada linha.
+   `SAAS_EMAIL_REMETENTE`. Logs com a empresa em cada linha (`MY_Log`).
+   Configurações da empresa fora do `.env` da plataforma (gateways por empresa).
 4. ~~Painel da plataforma~~ feito em 2026-11-07: 2FA obrigatório, contas do
    painel, minha conta, planos e vencimento, backup, cancelar e excluir
    empresa. Fica para a Fase 5: cobrança (gateway a escolher) e bloqueio

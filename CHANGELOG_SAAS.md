@@ -9,6 +9,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07, logs)
+- `application/core/MY_Log.php`: cada linha do log traz a empresa (`[schema]`) ou `[plataforma]`.
+
 ### Security (2026-11-07, configurações por empresa)
 - Numa empresa, Configurações gravava no `.env` compartilhado: o admin de qualquer loja trocava o SMTP, **as credenciais dos gateways de pagamento de todas as lojas**, ligava/desligava a API e gerava a chave dos tokens da plataforma, além de atualizar o código pelo GitHub. Agora gateways, API e impressão são da empresa (`configuracoes.tenant_env`, segredos cifrados), credenciais de pagamento nunca herdam as da plataforma, SMTP e chave dos tokens somem da tela e a atualização do código dá 404 numa empresa.
 
