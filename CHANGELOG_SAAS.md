@@ -9,6 +9,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Security (2026-11-07, revisão de isolamento)
+- Instalador: sem `application/.env` em arquivo (produção em Docker, configuração pelas variáveis), ele se achava "não instalado" e abriria se o servidor web não bloqueasse `/install/`. Agora as variáveis do ambiente também contam como instalado.
+- Numa empresa, as pastas antigas comuns de anexos (`assets/anexos`, `assets/arquivos`) não são mais aceitas: só a pasta da empresa.
+- Temporários do mPDF saem de `assets/uploads/temp` (pública e comum) para a pasta temporária do sistema.
+- `docs/multi-tenancy.md`: tabela do que as empresas compartilham e como cada item fica isolado.
+
 ### Added (2026-11-07, produção)
 - `docker/producao/` e `docs/producao-vps.md`: Map-OS numa VPS que já roda outro sistema atrás de Traefik.
   - Projeto Docker próprio, com MySQL, PHP-FPM, nginx interno e cron como www-data.

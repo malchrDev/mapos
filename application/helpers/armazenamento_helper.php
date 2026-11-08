@@ -215,6 +215,12 @@ if (! function_exists('armazenamentoLocalizar')) {
             return null;
         }
 
+        // As pastas antigas (assets/anexos, assets/arquivos) são comuns a todas
+        // as empresas: numa empresa do SaaS só vale a pasta dela.
+        if (armazenamentoTenant() !== null) {
+            $raizesLegadas = [];
+        }
+
         foreach (array_merge([armazenamentoRaiz()], $raizesLegadas) as $raiz) {
             $raiz = realpath($raiz);
             if ($raiz !== false && str_starts_with($real, $raiz . DIRECTORY_SEPARATOR)) {

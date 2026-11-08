@@ -48,16 +48,55 @@ final class InstaladorTest extends MaposTestCase
         ];
     }
 
+    /** Roda $teste sem as variáveis que indicam um sistema configurado pelo ambiente. */
+    private function semAmbiente(callable $teste, array $definir = []): void
+    {
+        $nomes = ['APP_ENVIRONMENT', 'DB_MASTER_DATABASE', 'DB_DATABASE'];
+        $antes = [];
+        foreach ($nomes as $nome) {
+            $antes[$nome] = [getenv($nome), $_ENV[$nome] ?? null, $_SERVER[$nome] ?? null];
+            putenv($nome);
+            unset($_ENV[$nome], $_SERVER[$nome]);
+        }
+        foreach ($definir as $nome => $valor) {
+            putenv($nome . '=' . $valor);
+        }
+
+        try {
+            $teste();
+        } finally {
+            foreach ($antes as $nome => [$env, $global, $servidor]) {
+                putenv($env === false ? $nome : $nome . '=' . $env);
+                if ($global !== null) {
+                    $_ENV[$nome] = $global;
+                }
+                if ($servidor !== null) {
+                    $_SERVER[$nome] = $servidor;
+                }
+            }
+        }
+    }
+
     public function testSoEstaInstaladoComEnvOuComLock(): void
     {
-        $this->assertFalse(instaladorInstalado($this->raiz));
+        $this->semAmbiente(function () {
+            $this->assertFalse(instaladorInstalado($this->raiz));
 
-        touch($this->raiz . '/install/instalado.lock');
-        $this->assertTrue(instaladorInstalado($this->raiz));
+            touch($this->raiz . '/install/instalado.lock');
+            $this->assertTrue(instaladorInstalado($this->raiz));
 
-        unlink($this->raiz . '/install/instalado.lock');
-        touch($this->raiz . '/application/.env');
-        $this->assertTrue(instaladorInstalado($this->raiz));
+            unlink($this->raiz . '/install/instalado.lock');
+            touch($this->raiz . '/application/.env');
+            $this->assertTrue(instaladorInstalado($this->raiz));
+        });
+    }
+
+    public function testConfiguradoPelasVariaveisDoContainerContaComoInstalado(): void
+    {
+        // Produção em Docker: sem application/.env, a configuração vem do ambiente.
+        $this->semAmbiente(fn () => $this->assertTrue(instaladorInstalado($this->raiz)), ['APP_ENVIRONMENT' => 'production']);
+        $this->semAmbiente(fn () => $this->assertTrue(instaladorInstalado($this->raiz)), ['DB_MASTER_DATABASE' => 'mapos_master']);
+        $this->semAmbiente(fn () => $this->assertFalse(instaladorInstalado($this->raiz)), ['APP_ENVIRONMENT' => 'pre_installation']);
     }
 
     public function testValidacaoAceitaOFormularioCompleto(): void

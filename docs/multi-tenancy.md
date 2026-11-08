@@ -342,6 +342,34 @@ mudança) não vale numa empresa. Os refresh tokens já ficavam no banco de cada
 empresa. O schema atual vem de `tenantSchemaAtual()` (`helpers/tenant_helper.php`),
 o mesmo que separa os uploads.
 
+## O que as empresas compartilham (revisão de isolamento, 2026-11-07)
+
+Tudo o que não está no banco da empresa e como cada coisa fica separada. Uma
+mudança que crie um recurso comum novo (arquivo, cache, chave, tarefa) entra
+nesta tabela.
+
+| Recurso comum | Isolamento |
+| --- | --- |
+| Banco | Um schema por empresa; o hook aponta a conexão pelo Host verificado |
+| Sessões e tentativas de login | Tabelas no banco de cada empresa; cookie só do endereço atual (o hook força `cookie_domain` vazio) |
+| Tokens da API | Chave derivada por empresa e claim `ten` |
+| `.env` (SMTP, gateways, chaves) | A empresa não grava nem vê o `.env`; o que é dela fica em `configuracoes.tenant_env` |
+| Uploads sensíveis | `STORAGE_PATH/<schema>/`; numa empresa as pastas antigas comuns (`assets/anexos`, `assets/arquivos`) não valem |
+| Logo e fotos de perfil | `assets/uploads` e `assets/userImage`, comuns, públicas por desenho, nome aleatório; cada empresa só cita as dela |
+| Temporários do mPDF | Fora do site (`sys_get_temp_dir()`); antes ficavam em `assets/uploads/temp`, pública |
+| Cache do HTML Purifier | Fora do site; guarda só definições de HTML, sem dado de empresa |
+| Logs | Arquivo comum, com a empresa em cada linha (`MY_Log`) |
+| Fila de e-mails e tarefas | Um processo por empresa (`tools tenants_tarefa`) |
+| Código e atualização | Um só; atualizar pelo GitHub dá 404 numa empresa |
+| Instalador | Bloqueado no nginx e, sem `.env` em arquivo, também pelas variáveis do ambiente (`instaladorConfiguradoPeloAmbiente`) |
+| Painel da plataforma | Só no `SAAS_PAINEL_HOST`, banco mestre, contas próprias com 2FA |
+
+Sem cache de saída nem de consulta do CodeIgniter (`cache_path` vazio, nenhum
+`output->cache()`), e nenhum nome de banco fixo no código. Os gateways de
+pagamento ainda não recebem notificação (as URLs são exemplos do Map-OS
+original): quando a Fase 5 criar a rota de retorno, ela precisa resolver a
+empresa pelo Host, como o resto.
+
 ## Produção
 
 VPS com outro sistema atrás de Traefik: `docs/producao-vps.md` e `docker/producao/`.

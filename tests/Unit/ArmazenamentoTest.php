@@ -89,6 +89,18 @@ final class ArmazenamentoTest extends MaposTestCase
         $this->assertNull(armazenamentoPasta('../mapos_loja1_a1b2c3/anexos'));
     }
 
+    public function testNaEmpresaAsPastasAntigasComunsNaoValem(): void
+    {
+        $legada = $this->raiz . DIRECTORY_SEPARATOR . 'assets-anexos';
+        mkdir($legada, 0777, true);
+        file_put_contents($legada . '/antigo.png', 'x');
+
+        $this->assertNotNull(armazenamentoLocalizar($legada . '/antigo.png', [$legada]), 'Instalação única: o anexo antigo ainda abre.');
+
+        $GLOBALS['mapos_tenant_schema'] = 'mapos_loja1_a1b2c3';
+        $this->assertNull(armazenamentoLocalizar($legada . '/antigo.png', [$legada]), 'Empresa: pasta comum a todas não vale.');
+    }
+
     public function testSchemaDeTenantInvalidoFalhaFechado(): void
     {
         foreach (['../fora', 'Mapos', 'a/b', 'a b', str_repeat('a', 65)] as $invalido) {
