@@ -61,7 +61,7 @@ Copie para a pasta nova:
 - `application/.env` (veja o passo 3.3);
 - `assets/uploads` e `assets/userImage`;
 - as personalizações de `assets/img`;
-- `assets/anexos` e `assets/arquivos`, **só para que a migration os encontre** (passo 3.4). Depois da migração eles ficam vazios. **Não pule este passo:** se os arquivos não estiverem na pasta nova quando você rodar a atualização do banco, a migration conclui, mas os registros ficam sem arquivo e a OS mostra "Arquivo não encontrado" no lugar de cada anexo. Nesse caso, copie `assets/anexos` e `assets/arquivos` da 4.x para a pasta nova e refaça só essa migration: `php index.php tools migrate 20261014020000` (desfaz a `move_uploads_to_storage`) e depois `php index.php tools migrate`. Os registros órfãos mantêm o caminho antigo, então a segunda execução move os arquivos que agora existem.
+- `assets/anexos` e `assets/arquivos`, **só para que a migration os encontre** (passo 3.5). Depois da migração eles ficam vazios. **Não pule este passo:** se os arquivos não estiverem na pasta nova quando você rodar a atualização do banco, a migration conclui, mas os registros ficam sem arquivo e a OS mostra "Arquivo não encontrado" no lugar de cada anexo. Nesse caso, copie `assets/anexos` e `assets/arquivos` da 4.x para a pasta nova e refaça só essa migration: `php index.php tools migrate 20261014020000` (desfaz a `move_uploads_to_storage`) e depois `php index.php tools migrate`. Os registros órfãos mantêm o caminho antigo, então a segunda execução move os arquivos que agora existem.
 
 ### 3.3. Ajuste o `application/.env`
 
@@ -105,7 +105,32 @@ Pontos de atenção:
 - **Atrás de proxy reverso** (Nginx na frente, Cloudflare, load balancer), preencha `APP_PROXY_IPS`; do contrário o sistema não percebe que o acesso é HTTPS e os cookies e o HSTS não funcionam como esperado. Detalhes em [cookies-e-sessao.md](cookies-e-sessao.md) e [cabecalhos-de-seguranca.md](cabecalhos-de-seguranca.md).
 - **Não troque `APP_ENCRYPTION_KEY`.** Ela cifra os segredos do 2FA e alimenta o limite de tentativas de login.
 
-### 3.4. Defina o `STORAGE_PATH` e rode as migrations
+### 3.4. Multi-tenancy: nada a fazer
+
+A Fase 1 do SaaS (**schema por tenant**) **não muda nada para quem já usa o
+Map-OS em instalação única**. Não há coluna nova nas tabelas de negócio, não há
+migration a rodar e nenhum comportamento se altera.
+
+O multi-tenancy só liga quando você define, no `.env`:
+
+```
+DB_MASTER_DATABASE=mapos_master
+```
+
+Com a variável vazia — o padrão, e como continua qualquer instalação que não mexa
+nela — o hook de tenant não faz nada e o banco de trabalho é o `DB_DATABASE` de
+sempre.
+
+Se você for provisionar tenants, veja
+[multi-tenancy.md](multi-tenancy.md): `DB_MASTER_DATABASE` precisa ser um banco
+**diferente** dos schemas dos tenants, `SAAS_DOMINIO_BASE` e `SAAS_PAINEL_HOST`
+definem os subdomínios e o hostname do painel, e as migrations do banco mestre
+(`application/database/migrations_mestre/`) rodam com
+`php index.php tools tenant_mestre`, nunca no schema do tenant. Com a variável
+preenchida, Host sem tenant recebe 404 — a instalação deixa de responder pelo
+`DB_DATABASE` na web.
+
+### 3.5. Defina o `STORAGE_PATH` e rode as migrations
 
 Defina o `STORAGE_PATH` **antes** de migrar. Crie a pasta fora da pasta pública do servidor web e dê permissão de escrita ao usuário do PHP:
 
@@ -151,7 +176,7 @@ As migrations da v5, na ordem em que rodam (conferidas em `application/database/
 
 Sobre o `move_uploads_to_storage`: ele pode rodar de novo com segurança; arquivo que não for encontrado fica como estava. Depois de migrar, confira que os anexos abrem e que `assets/anexos` e `assets/arquivos` esvaziaram. O link direto antigo (`/assets/anexos/...`) deixa de funcionar de propósito. Mais detalhes, e o rollback, em [armazenamento-de-arquivos.md](armazenamento-de-arquivos.md).
 
-### 3.5. Configure o servidor web
+### 3.6. Configure o servidor web
 
 A v5 foi feita para o servidor entregar **só** `index.php`, `assets/` e, até o fim da instalação, `install/`. Todo o resto (`application/`, `updates/`, `scripts/`, `tests/`, `docker/`, `docs/`, `banco.sql`, `composer.json` e demais arquivos de projeto, e qualquer arquivo que comece com `.`) só é lido pelo PHP.
 
@@ -173,7 +198,7 @@ O melhor complemento é apontar o `STORAGE_PATH` para fora da pasta pública ([a
 
 Depois de testar o acesso, **apague a pasta `install/`** do servidor.
 
-### 3.6. Tarefas agendadas
+### 3.7. Tarefas agendadas
 
 Os cron jobs de e-mail continuam os mesmos:
 
@@ -182,7 +207,7 @@ Os cron jobs de e-mail continuam os mesmos:
 */5 * * * * php /caminho/do/sistema/index.php email/retry
 ```
 
-### 3.7. Confira
+### 3.8. Confira
 
 - Login no painel e na área do cliente (`/mine`).
 - Dashboard, uma OS (abrir, anexar arquivo, mudar o desconto de um item), uma venda e um lançamento.

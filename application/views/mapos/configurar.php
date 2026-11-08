@@ -9,7 +9,9 @@
  * - Segredos do .env (senhas, tokens) nunca voltam para a tela: o campo vem
  *   vazio e, em branco, mantém o valor atual.
  * - A aba Atualizações atualiza o banco por POST confirmado em modal-confirm
- *   e leva à tela mapos/atualizacao para atualizar o Map-OS (#2871).
+ *   e leva à tela mapos/atualizacao para atualizar o Map-OS (#2871). Numa
+ *   empresa do SaaS o código é da plataforma: sem esse botão, e sem a aba
+ *   E-mail (configuracaoAbas()).
  *
  * @var string                $aba
  * @var array<string, array>  $campos
@@ -25,7 +27,7 @@ $icones = ['geral' => 'settings', 'os' => 'wrench', 'vendas' => 'shopping-cart',
 $curtos = ['os' => 'OS', 'vendas' => 'Vendas', 'pagamentos' => 'Gateways', 'sistema' => 'Atualizar'];
 
 $abas = [];
-foreach (CONFIG_ABAS as $chave => $rotulo) {
+foreach (configuracaoAbas() as $chave => $rotulo) {
     $abas[] = ['label' => $rotulo, 'short' => $curtos[$chave] ?? null, 'url' => site_url('mapos/configurar') . ($chave === 'geral' ? '' : listagemQuery(['aba' => $chave])), 'active' => $aba === $chave, 'icon' => $icones[$chave]];
 }
 
@@ -87,6 +89,7 @@ foreach ($campos as $nome => $def) {
                 <?php } ?>
             </div>
         </section>
+        <?php if (! configuracaoNaEmpresa()) { ?>
         <section class="<?= e($caixa) ?>" aria-labelledby="secao-mapos">
             <h2 id="secao-mapos" class="text-heading-sm text-text">Map-OS</h2>
             <p class="mt-1 text-caption text-muted">Consulta a última release do GitHub, mostra o que mudou e, se você confirmar, substitui os arquivos depois de conferir o SHA256 do zip. O <code>.env</code> e os uploads não são alterados.</p>
@@ -94,6 +97,7 @@ foreach ($campos as $nome => $def) {
                 <?= component('button', ['label' => 'Verificar atualização', 'icon' => 'download', 'variant' => 'outline', 'href' => site_url('mapos/atualizacao')]) ?>
             </div>
         </section>
+        <?php } ?>
 
         <form id="form-atualizar-banco" method="post" action="<?= e(site_url('mapos/atualizarBanco')) ?>" hidden><input type="hidden" name="<?= e($this->security->get_csrf_token_name()) ?>" value="<?= e($this->security->get_csrf_hash()) ?>"></form>
         <?= component('modal-confirm', ['id' => 'atualizar-banco', 'title' => 'Atualizar o banco de dados?', 'message' => 'As migrations pendentes alteram as tabelas. Recomendamos baixar um backup antes.', 'confirm_label' => 'Atualizar', 'icon' => 'download', 'confirm_attrs' => ['form' => 'form-atualizar-banco']]) ?>

@@ -23,11 +23,20 @@ if (! class_exists('MpdfClienteSemRede')) {
 }
 
 if (! function_exists('mpdfCriar')) {
-    /** mPDF A4 sem acesso à rede, com a pasta temporária do projeto. */
+    /**
+     * mPDF A4 sem acesso à rede. A pasta temporária fica fora do site
+     * (sys_get_temp_dir()): assets/uploads/temp é pública e, no SaaS, comum a
+     * todas as empresas.
+     */
     function mpdfCriar(bool $landscape = false): \Mpdf\Mpdf
     {
+        $temporaria = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mapos-mpdf';
+        if (! is_dir($temporaria) && ! @mkdir($temporaria, 0700, true) && ! is_dir($temporaria)) {
+            $temporaria = FCPATH . 'assets/uploads/temp/';
+        }
+
         return new \Mpdf\Mpdf(
-            ['c', $landscape ? 'A4-L' : 'A4', 'tempDir' => FCPATH . 'assets/uploads/temp/'],
+            ['c', $landscape ? 'A4-L' : 'A4', 'tempDir' => $temporaria],
             new \Mpdf\Container\SimpleContainer(['httpClient' => new MpdfClienteSemRede()])
         );
     }

@@ -153,6 +153,27 @@ function &re_get_instance()
 {
 }
 
+// CI_Migration: o Tenant_manager instancia direto, com a pasta de migrations
+// do mestre ou do tenant. Só a API pública que o Map-OS usa.
+class CI_Migration
+{
+    public function __construct($config = [])
+    {
+    }
+
+    /** @return bool|string */
+    public function latest()
+    {
+        return true;
+    }
+
+    /** @return string */
+    public function error_string()
+    {
+        return '';
+    }
+}
+
 // CI_Model recebe as mesmas bibliotecas injetadas na instância que o
 // controller. Sem esta classe, todo model reporta $db e $input inexistentes.
 //
@@ -223,6 +244,20 @@ function config_item($item)
 
 // CI_Email é a classe que MY_Email estende. Vazia porque o PHPStan só precisa
 // que o nome exista paraMY_Email resolver.
+class CI_Log
+{
+    /**
+     * @param  string  $level
+     * @param  string  $date
+     * @param  string  $message
+     * @return string
+     */
+    protected function _format_line($level, $date, $message)
+    {
+        return $level . ' - ' . $date . ' --> ' . $message . PHP_EOL;
+    }
+}
+
 class CI_Email
 {
     public function __construct()
@@ -254,6 +289,19 @@ class CI_Email
 
     /** @var array */
     public $_headers = [];
+
+    /** @var bool Já houve reply_to() neste envio (CI_Email::$_replyto_flag) */
+    protected $_replyto_flag = false;
+
+    /**
+     * @param  string  $replyto
+     * @param  string  $name
+     * @return static
+     */
+    public function reply_to($replyto, $name = '')
+    {
+        return $this;
+    }
 
     /** @var array */
     public $_recipients = [];

@@ -68,6 +68,43 @@ if (! function_exists('configuracaoCampos')) {
      */
     function configuracaoCampos(string $aba): array
     {
+        $campos = configuracaoCamposDaInstalacao($aba);
+
+        // Numa empresa do SaaS, SMTP e chave dos tokens são da plataforma: não
+        // aparecem nem são gravados (tenant_helper.php, TENANT_ENV_PLATAFORMA).
+        if (configuracaoNaEmpresa()) {
+            $campos = array_diff_key($campos, array_flip(TENANT_ENV_PLATAFORMA));
+        }
+
+        return $campos;
+    }
+}
+
+if (! function_exists('configuracaoNaEmpresa')) {
+    /** A tela está numa empresa do SaaS (e não na instalação única)? */
+    function configuracaoNaEmpresa(): bool
+    {
+        return function_exists('tenantSchemaAtual') && tenantSchemaAtual() !== null;
+    }
+}
+
+if (! function_exists('configuracaoAbas')) {
+    /**
+     * Abas da tela de configurações. Numa empresa do SaaS a aba E-mail some
+     * (o SMTP é da plataforma).
+     *
+     * @return array<string, string>
+     */
+    function configuracaoAbas(): array
+    {
+        return configuracaoNaEmpresa() ? array_diff_key(CONFIG_ABAS, ['email' => true]) : CONFIG_ABAS;
+    }
+}
+
+if (! function_exists('configuracaoCamposDaInstalacao')) {
+    /** Todos os campos de uma aba, como na instalação única (configuracaoCampos()). */
+    function configuracaoCamposDaInstalacao(string $aba): array
+    {
         $statusOs = array_combine(array_keys(OS_STATUS_VARIANTES), array_keys(OS_STATUS_VARIANTES));
 
         return match ($aba) {

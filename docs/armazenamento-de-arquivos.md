@@ -17,6 +17,8 @@ Imagens e PDF abrem na página; os demais formatos baixam. A logo do emitente e 
 - `UPLOAD_MAX_KB`: tamanho máximo de cada upload, em KB (padrão 10240). Os limites `upload_max_filesize` e `post_max_size` do PHP também valem.
 - `UPLOAD_MAX_PIXELS`: limite de pixels (largura × altura) de uma imagem enviada (padrão 40000000, 40 megapixels). Um arquivo pequeno pode ter dimensões enormes, e a miniatura (GD) e os PDFs descompactam a imagem inteira na memória.
 
+Com multi-tenancy ligada (`DB_MASTER_DATABASE`), cada empresa usa a subpasta `STORAGE_PATH/<schema>/`; ver `docs/multi-tenancy.md`, seção "Uploads por empresa".
+
 Formatos aceitos: anexos de OS em JPG, PNG, GIF, PDF, DOCX, CDR e TXT; arquivos em JPG, PNG, GIF, PDF e TXT. Além da extensão, o conteúdo do arquivo (MIME) é conferido; o nome gravado é aleatório e o servidor responde com `X-Content-Type-Options: nosniff`.
 
 ## Migração dos arquivos existentes

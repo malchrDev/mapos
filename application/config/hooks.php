@@ -48,5 +48,15 @@ $hook['pre_system'][] = [
     'params' => [],
 ];
 
+// Resolução do tenant pelo hostname (Fase 1 — multi-tenancy). Roda antes de o
+// framework carregar o banco, e o schema resolvido entra no $_ENV que
+// config/database.php lê. Ver docs/multi-tenancy.md.
+$hook['pre_system'][] = [
+    'class' => '',
+    'function' => 'resolverTenant',
+    'filename' => 'tenant.php',
+    'filepath' => 'hooks',
+];
+
 /* End of file hooks.php */
 /* Location: ./application/config/hooks.php */

@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<files version="1">
+ <file path="application/vendor/codeigniter/framework/system/database/DB_driver.php">
+  <line number="372" hash="f579bfd3df4c1c22eed2bcf0b7c1a552a26b23a1">
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+   <issue><![CDATA[Creation of dynamic property CI_DB_mysqli_driver::$failover is deprecated]]></issue>
+  </line>
+ </file>
+</files>

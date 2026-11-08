@@ -10,6 +10,8 @@
  * registros antigos com caminho absoluto em assets/ ainda são lidos até a
  * migration mover os arquivos.
  */
+require_once __DIR__ . '/tenant_helper.php';
+
 if (! defined('ARMAZENAMENTO_LIMITE_PADRAO_KB')) {
     define('ARMAZENAMENTO_LIMITE_PADRAO_KB', 10240);
 }
@@ -19,9 +21,25 @@ if (! function_exists('armazenamentoRaiz')) {
      * Pasta raiz dos uploads: STORAGE_PATH (absoluto, ou relativo à raiz do
      * projeto) ou, sem ela, application/storage, que recebe um .htaccess que
      * nega o acesso web. O ideal é apontar STORAGE_PATH para fora da pasta
-     * pública (docs/armazenamento-de-arquivos.md).
+     * pública (docs/armazenamento-de-arquivos.md). Com multi-tenancy, a raiz
+     * é a subpasta do schema da empresa (armazenamentoTenant()).
      */
     function armazenamentoRaiz(): string
+    {
+        $raiz = armazenamentoRaizBase();
+        $schema = armazenamentoTenant();
+
+        return $schema === null ? $raiz : $raiz . DIRECTORY_SEPARATOR . $schema;
+    }
+}
+
+if (! function_exists('armazenamentoRaizBase')) {
+    /**
+     * STORAGE_PATH (ou application/storage) sem a subpasta da empresa. Só a
+     * plataforma usa direto (backups, pasta de uma empresa); telas de empresa
+     * usam armazenamentoRaiz().
+     */
+    function armazenamentoRaizBase(): string
     {
         $configurado = trim((string) ($_ENV['STORAGE_PATH'] ?? ''));
 
@@ -34,6 +52,18 @@ if (! function_exists('armazenamentoRaiz')) {
         }
 
         return rtrim($configurado, '/\\');
+    }
+}
+
+if (! function_exists('armazenamentoTenant')) {
+    /**
+     * Schema da empresa atendida agora (tenantSchemaAtual()), ou null na
+     * instalação única. Cada empresa tem a própria pasta dentro de
+     * STORAGE_PATH, e os caminhos no banco continuam relativos a ela.
+     */
+    function armazenamentoTenant(): ?string
+    {
+        return tenantSchemaAtual();
     }
 }
 
@@ -183,6 +213,12 @@ if (! function_exists('armazenamentoLocalizar')) {
         $real = realpath($caminho);
         if ($real === false || ! is_file($real)) {
             return null;
+        }
+
+        // As pastas antigas (assets/anexos, assets/arquivos) são comuns a todas
+        // as empresas: numa empresa do SaaS só vale a pasta dela.
+        if (armazenamentoTenant() !== null) {
+            $raizesLegadas = [];
         }
 
         foreach (array_merge([armazenamentoRaiz()], $raizesLegadas) as $raiz) {

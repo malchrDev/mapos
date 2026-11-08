@@ -187,6 +187,12 @@ if (! function_exists('printSafeHtml')) {
 
         if (! isset($purifiers[$chave])) {
             $config = HTMLPurifier_Config::createDefault();
+            // Cache fora de application/vendor: o código pode estar montado só
+            // para leitura (produção em container).
+            $cache = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mapos-htmlpurifier';
+            if (is_dir($cache) || @mkdir($cache, 0700, true)) {
+                $config->set('Cache.SerializerPath', $cache);
+            }
             $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true, 'tel' => true]);
             if ($semRecursosExternos) {
                 $config->set('URI.DisableExternalResources', true);

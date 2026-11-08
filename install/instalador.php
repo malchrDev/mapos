@@ -26,7 +26,27 @@ function instaladorInstalado(?string $raiz = null): bool
 {
     $raiz ??= instaladorRaiz();
 
-    return file_exists($raiz . '/application/.env') || file_exists($raiz . '/install/instalado.lock');
+    return file_exists($raiz . '/application/.env') || file_exists($raiz . '/install/instalado.lock') || instaladorConfiguradoPeloAmbiente();
+}
+
+/**
+ * Configuração vinda das variáveis do servidor ou do container (produção em
+ * Docker, SaaS), sem application/.env em arquivo: também é um sistema
+ * instalado. Sem isso o instalador abriria e reconfiguraria a plataforma.
+ */
+function instaladorConfiguradoPeloAmbiente(): bool
+{
+    foreach (['APP_ENVIRONMENT', 'DB_MASTER_DATABASE', 'DB_DATABASE'] as $variavel) {
+        $valor = getenv($variavel);
+        if ($valor === false) {
+            $valor = $_SERVER[$variavel] ?? $_ENV[$variavel] ?? '';
+        }
+        if (trim((string) $valor) !== '' && $valor !== 'pre_installation') {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /** Resposta curta e sem detalhes (versão do PHP, requisitos, caminhos) de um sistema já instalado. */

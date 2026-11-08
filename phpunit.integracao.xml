@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Testes de integração contra MySQL real. Rodam no container de
+     docker/teste/docker-compose.yml; fora dele (sem DB_MASTER_DATABASE) são
+     pulados. Ver docs/multi-tenancy.md. -->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="application/vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/Integration/bootstrap.php"
+         cacheDirectory=".phpunit.cache"
+         colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         beStrictAboutOutputDuringTests="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         displayDetailsOnTestsThatTriggerErrors="true">
+
+    <!-- Mesmo motivo do phpunit-baseline.xml: o DB_driver do CI3 cria
+         propriedades dinâmicas (deprecado no PHP 8.2+). -->
+    <source baseline="phpunit-integracao-baseline.xml">
+        <include>
+            <directory suffix=".php">application</directory>
+        </include>
+    </source>
+
+    <testsuites>
+        <testsuite name="Map-OS Integração">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

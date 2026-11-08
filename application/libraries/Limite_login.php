@@ -19,7 +19,8 @@ if (! defined('BASEPATH')) {
  * sessão ou quer recuperar a senha (#2879): `confirmacao` (senha pedida de novo
  * para trocar a senha ou mexer no 2FA, por e-mail do usuário logado) e `reset`
  * (pedidos de recuperação de senha: cada pedido conta como tentativa, por
- * e-mail e IP; use registrarFalha() a cada pedido).
+ * e-mail e IP; use registrarFalha() a cada pedido). E `plataforma`: o login do
+ * painel administrativo do SaaS (contas do banco mestre, outra tabela).
  *
  * Cada falha conta em duas chaves: o e-mail informado (exista ou não a conta,
  * para o bloqueio não revelar quais e-mails têm cadastro) e o IP. Ao chegar ao
@@ -50,9 +51,9 @@ class Limite_login
 
     private const TABELA = 'login_attempts';
 
-    private const ESCOPOS = ['usuario', 'cliente', 'confirmacao', 'reset'];
+    private const ESCOPOS = ['usuario', 'cliente', 'confirmacao', 'reset', 'plataforma'];
 
-    private const ROTULOS = ['usuario' => 'painel', 'cliente' => 'área do cliente', 'confirmacao' => 'confirmação de senha', 'reset' => 'recuperação de senha'];
+    private const ROTULOS = ['usuario' => 'painel', 'cliente' => 'área do cliente', 'confirmacao' => 'confirmação de senha', 'reset' => 'recuperação de senha', 'plataforma' => 'painel da plataforma'];
 
     /** @var mixed Query Builder do CodeIgniter (CI_DB_query_builder) */
     private $db;

@@ -35,3 +35,6 @@ uploads
 application/.env
 assets/userImage
 application/storage/
+
+# .env de produção (docker/producao/env.exemplo é o modelo)
+docker/producao/.env

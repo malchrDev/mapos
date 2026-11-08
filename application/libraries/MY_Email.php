@@ -1,6 +1,8 @@
 <?php
 
 defined('BASEPATH') or exit('No direct script access allowed');
+
+require_once __DIR__ . '/../helpers/tenant_helper.php';
 /**
  * CodeIgniter Email Queue
  *
@@ -117,7 +119,10 @@ class MY_Email extends CI_Email
     public function start_process()
     {
         $filename = FCPATH . 'index.php';
-        $exec = shell_exec("{$this->phpcli} {$filename} {$this->main_controller} > /dev/null &");
+        // Numa empresa do SaaS o processo precisa saber de qual (tenantResolverCli).
+        $schema = tenantSchemaAtual();
+        $ambiente = $schema !== null ? 'MAPOS_TENANT_SCHEMA=' . escapeshellarg($schema) . ' ' : '';
+        $exec = shell_exec("{$ambiente}{$this->phpcli} {$filename} {$this->main_controller} > /dev/null &");
 
         return $exec;
     }
@@ -146,6 +151,15 @@ class MY_Email extends CI_Email
             $bcc = ! empty($email->bcc) ? explode(', ', $email->bcc) : [];
 
             $this->_headers = json_decode_legacy($email->headers);
+            $this->_headers = $this->cabecalhosDoEnvio(is_array($this->_headers) ? $this->_headers : []);
+            // O CI_Email troca o Reply-To pelo From, a menos que venha por reply_to().
+            if (isset($this->_headers['Reply-To'])) {
+                $responder = (string) $this->_headers['Reply-To'];
+                unset($this->_headers['Reply-To']);
+                $this->reply_to($responder);
+            } else {
+                $this->_replyto_flag = false;
+            }
 
             $this->to($recipients);
             $this->cc($cc);
@@ -166,6 +180,59 @@ class MY_Email extends CI_Email
             $this->CI->db->set('date', date('Y-m-d H:i:s'));
             $this->CI->db->update($this->table_email_queue);
         }
+    }
+
+    /** @var string|null|false Nome do emitente da empresa (false = ainda não lido) */
+    private $nomeDoEmitente = false;
+
+    /**
+     * Cabeçalhos com que o e-mail da fila sai. Numa empresa do SaaS com
+     * SAAS_EMAIL_REMETENTE preenchido, o remetente passa a ser o da plataforma
+     * (dono do SMTP), com o nome da empresa e "Responder para" o e-mail dela:
+     * mandar "De: contato@empresa.com" pelo SMTP da plataforma falha no
+     * SPF/DMARC e cai em spam. Fora disso, nada muda.
+     */
+    private function cabecalhosDoEnvio(array $cabecalhos): array
+    {
+        $remetente = trim((string) ($_ENV['SAAS_EMAIL_REMETENTE'] ?? ''));
+        if ($remetente === '' || ! function_exists('tenantSchemaAtual') || tenantSchemaAtual() === null) {
+            return $cabecalhos;
+        }
+
+        if ($this->nomeDoEmitente === false) {
+            $linha = $this->CI->db->select('nome')->limit(1)->get('emitente')->row();
+            $this->nomeDoEmitente = $linha->nome ?? null;
+        }
+
+        return self::cabecalhosDaPlataforma($cabecalhos, $remetente, $this->nomeDoEmitente);
+    }
+
+    /**
+     * Troca o From pelo remetente da plataforma. O From original vira
+     * Reply-To (se não houver um) e o nome dele (ou o do emitente) fica como
+     * nome de exibição. Quebras de linha, aspas e <> saem do nome: ele entra
+     * num cabeçalho.
+     */
+    public static function cabecalhosDaPlataforma(array $cabecalhos, string $remetente, ?string $nomeDoEmitente = null): array
+    {
+        if (filter_var($remetente, FILTER_VALIDATE_EMAIL) === false) {
+            return $cabecalhos;
+        }
+
+        $original = trim((string) ($cabecalhos['From'] ?? ''));
+        $nome = preg_match('/^"?([^"<]*)"?\s*</', $original, $m) ? trim($m[1]) : '';
+        $nome = $nome !== '' ? $nome : trim((string) $nomeDoEmitente);
+        $nome = trim((string) preg_replace('/[\r\n"<>\\\\]+/', ' ', $nome));
+
+        $enderecoOriginal = preg_match('/<([^>]+)>/', $original, $m) ? trim($m[1]) : $original;
+        if (! isset($cabecalhos['Reply-To']) && filter_var($enderecoOriginal, FILTER_VALIDATE_EMAIL) !== false && strcasecmp($enderecoOriginal, $remetente) !== 0) {
+            $cabecalhos['Reply-To'] = $enderecoOriginal;
+        }
+
+        $cabecalhos['From'] = $nome !== '' ? '"' . $nome . '" <' . $remetente . '>' : $remetente;
+        $cabecalhos['Return-Path'] = '<' . $remetente . '>';
+
+        return $cabecalhos;
     }
 
     /**
