@@ -130,14 +130,14 @@ final class PlataformaPainelTest extends TestCase
 
     public function testSuspenderEReativarMudaOQueOHookResolve(): void
     {
-        $novo = $this->provisionar('status.teste.local');
-        $this->assertNotNull(tenantSchemaDoHost('status.teste.local'));
+        $novo = $this->provisionar('situacao.teste.local');
+        $this->assertNotNull(tenantSchemaDoHost('situacao.teste.local'));
 
         $this->tenants->alterarStatus($novo['id'], 'suspenso');
-        $this->assertNull(tenantSchemaDoHost('status.teste.local'));
+        $this->assertNull(tenantSchemaDoHost('situacao.teste.local'));
 
         $this->tenants->alterarStatus($novo['id'], 'ativo');
-        $this->assertSame($novo['schema'], tenantSchemaDoHost('status.teste.local'));
+        $this->assertSame($novo['schema'], tenantSchemaDoHost('situacao.teste.local'));
     }
 
     public function testStatusInvalidoERecusado(): void

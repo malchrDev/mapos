@@ -342,6 +342,10 @@ mudança) não vale numa empresa. Os refresh tokens já ficavam no banco de cada
 empresa. O schema atual vem de `tenantSchemaAtual()` (`helpers/tenant_helper.php`),
 o mesmo que separa os uploads.
 
+## Produção
+
+VPS com outro sistema atrás de Traefik: `docs/producao-vps.md` e `docker/producao/`.
+
 ## Ambiente local (Docker)
 
 `docker/teste/` sobe MySQL 8.4, PHP-FPM 8.5 e nginx em `127.0.0.1:8090`. Os

@@ -125,13 +125,13 @@ final class TenantIsolamentoTest extends TestCase
 
     public function testAdminNasceComOEmailDoPedidoESenhaQueConfere(): void
     {
-        $novo = $this->provisionar('admin.teste.local');
+        $novo = $this->provisionar('dono.teste.local');
 
-        $this->assertSame('admin@admin.teste.local', $novo['admin_email']);
+        $this->assertSame('admin@dono.teste.local', $novo['admin_email']);
         $this->assertGreaterThanOrEqual(16, strlen($novo['admin_senha']));
 
         $db = $this->conexao($novo['schema']);
-        $usuario = $db->get_where('usuarios', ['email' => 'admin@admin.teste.local'])->row_array();
+        $usuario = $db->get_where('usuarios', ['email' => 'admin@dono.teste.local'])->row_array();
         $perfil = $db->get_where('permissoes', ['idPermissao' => $usuario['permissoes_id']])->row_array();
         $configs = array_column($db->get('configuracoes')->result_array(), 'valor', 'config');
         $db->close();

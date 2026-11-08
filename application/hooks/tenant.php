@@ -184,7 +184,11 @@ function tenantApontarBanco(string $banco, string $host, ?string $baseUrl = null
 
     $baseUrl ??= tenantBaseUrl($host);
     $_ENV['APP_BASEURL'] = $baseUrl;
-    load_class('Config', 'core')->set_item('base_url', $baseUrl);
+    $config = load_class('Config', 'core');
+    $config->set_item('base_url', $baseUrl);
+    // Cookie de sessão e de CSRF só para este endereço: com APP_COOKIE_DOMAIN
+    // (".seudominio") o cookie de uma empresa chegaria a todas as outras.
+    $config->set_item('cookie_domain', '');
 }
 
 /**

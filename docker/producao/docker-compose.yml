@@ -1,0 +1,103 @@
+# Map-OS SaaS em produção numa VPS que já roda outro sistema atrás de um
+# Traefik em Docker (rede externa saas_edge). Guia: docs/producao-vps.md.
+#
+# O Traefik continua dono das portas 80/443 e dos certificados. Este projeto
+# só se pendura na rede dele: o nginx daqui atende como "mapos-nginx", e as
+# rotas (uma por endereço) vêm do arquivo que o Map-OS grava em
+# /opt/mapos-dados/traefik/mapos.yml (tools traefik_rotas).
+#
+# A partir desta pasta:
+#   docker compose up -d --build --wait
+#
+# Senhas e chaves ficam em ./.env (fora do git; modelo em env.exemplo).
+name: mapos
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: mapos-web:producao
+  restart: unless-stopped
+  working_dir: /app
+  env_file:
+    - ./.env
+  volumes:
+    # Código só para leitura; o que precisa ser gravado tem volume próprio.
+    - "../../:/app:ro"
+    - "logs:/app/application/logs"
+    - "uploads:/app/assets/uploads"
+    - "fotos:/app/assets/userImage"
+    - "${MAPOS_DADOS:-/opt/mapos-dados}/storage:/storage"
+    - "${MAPOS_DADOS:-/opt/mapos-dados}/backups:/backups"
+    - "${MAPOS_DADOS:-/opt/mapos-dados}/traefik:/traefik"
+  depends_on:
+    mysql:
+      condition: service_healthy
+  networks:
+    - interno
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=80
+      - --performance-schema=OFF
+      - --skip-name-resolve
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${DB_MASTER_DATABASE:-mapos_master}
+      MYSQL_USER: ${DB_USERNAME:-mapos}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no .env}
+    volumes:
+      - "mysql:/var/lib/mysql"
+      - "./mysql-init.sql:/docker-entrypoint-initdb.d/01-mapos.sql:ro"
+    mem_limit: 900m
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    networks:
+      - interno
+
+  # PHP-FPM.
+  web:
+    <<: *app
+    mem_limit: 512m
+
+  # Tarefas agendadas por empresa (fila de e-mails), como www-data.
+  cron:
+    <<: *app
+    command: ["mapos-cron"]
+    mem_limit: 256m
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - "../../:/app:ro"
+      - "uploads:/app/assets/uploads:ro"
+      - "fotos:/app/assets/userImage:ro"
+      - "./nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+    depends_on:
+      - web
+    mem_limit: 128m
+    networks:
+      interno: {}
+      saas_edge:
+        aliases:
+          - mapos-nginx
+
+networks:
+  interno: {}
+  # A rede do Traefik que já existe na VPS (do outro sistema).
+  saas_edge:
+    external: true
+
+volumes:
+  mysql:
+  logs:
+  uploads:
+  fotos:

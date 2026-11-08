@@ -61,6 +61,8 @@ class Tools extends CI_Controller
         $result .= "php index.php tools plataforma_senha \"email\"         Platform panel: new password for an account.\n";
         $result .= "php index.php tools plataforma_2fa \"email\"           Platform panel: reset the 2FA of an account.\n";
         $result .= "php index.php tools tenants_tarefa email process       Run a scheduled task for every active tenant.\n";
+        $result .= "php index.php tools traefik_rotas                      Rewrite the Traefik routes file (SAAS_TRAEFIK_ARQUIVO).\n";
+        $result .= "php index.php tools tenants_backup                     Back up every tenant and prune old backups.\n";
 
         echo $result . PHP_EOL;
     }
@@ -262,6 +264,47 @@ class Tools extends CI_Controller
             if ($falhas > 0) {
                 exit(1);
             }
+        });
+    }
+
+    /**
+     * Backup de cada empresa ativa ou suspensa, e poda dos antigos dela
+     * (SAAS_BACKUP_RETENCAO_DIAS, padrão 14; os 3 mais novos ficam sempre).
+     * Falha de uma empresa vai para o log e não para as outras.
+     */
+    public function tenants_backup()
+    {
+        $this->executarTenant(function (Tenant_manager $tenants) {
+            $dias = (int) ($_ENV['SAAS_BACKUP_RETENCAO_DIAS'] ?? 0) ?: 14;
+            $falhas = 0;
+
+            foreach ($tenants->listar() as $tenant) {
+                if ($tenant['status'] === 'cancelado') {
+                    continue;
+                }
+                try {
+                    $backup = $tenants->backup((int) $tenant['id']);
+                    $podados = $tenants->podarBackups($tenant['schema'], $dias);
+                    echo sprintf('%-40s %s (%d KB), %d antigo(s) apagado(s)', $tenant['schema'], $backup['arquivo'], (int) ceil($backup['tamanho'] / 1024), $podados) . PHP_EOL;
+                } catch (Throwable $erro) {
+                    $falhas++;
+                    log_message('error', 'tenants_backup ' . $tenant['schema'] . ': ' . $erro->getMessage());
+                    echo sprintf('%-40s FALHOU: %s', $tenant['schema'], $erro->getMessage()) . PHP_EOL;
+                }
+            }
+
+            if ($falhas > 0) {
+                exit(1);
+            }
+        });
+    }
+
+    /** Regrava o arquivo de rotas do Traefik (SAAS_TRAEFIK_ARQUIVO) com todos os domínios. */
+    public function traefik_rotas()
+    {
+        $this->executarTenant(function (Tenant_manager $tenants) {
+            $arquivo = $tenants->gerarRotasTraefik();
+            echo $arquivo === null ? 'SAAS_TRAEFIK_ARQUIVO vazio: nada a gerar.' . PHP_EOL : "Rotas gravadas em {$arquivo}." . PHP_EOL;
         });
     }
 

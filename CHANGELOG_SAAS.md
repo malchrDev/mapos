@@ -9,6 +9,18 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) e
 
 ## [Não publicado]
 
+### Added (2026-11-07, produção)
+- `docker/producao/` e `docs/producao-vps.md`: Map-OS numa VPS que já roda outro sistema atrás de Traefik.
+  - Projeto Docker próprio, com MySQL, PHP-FPM, nginx interno e cron como www-data.
+  - Código montado só para leitura.
+  - IP real do visitante e HTTPS repassados pelo proxy.
+  - Arquivos da raiz (`banco.sql`, `composer.json`, `*.md`) e o instalador bloqueados.
+- Rotas do Traefik geradas pelo Map-OS (`SAAS_TRAEFIK_ARQUIVO`, `tools traefik_rotas`): uma rota e um certificado por endereço, atualizadas ao criar empresa, verificar domínio ou excluir empresa.
+- Subdomínios reservados (lista fixa + `SAAS_SUBDOMINIOS_RESERVADOS`) e endereço de empresa com um nível só.
+- `tools tenants_backup`: backup diário de cada empresa, com poda (`SAAS_BACKUP_RETENCAO_DIAS`, padrão 14; os 3 mais novos ficam).
+- Cookie de sessão e de CSRF sempre só do endereço atual no SaaS, mesmo com `APP_COOKIE_DOMAIN` preenchido.
+- Cache do HTML Purifier fora de `application/vendor`.
+
 ### Added (2026-11-07, logs)
 - `application/core/MY_Log.php`: cada linha do log traz a empresa (`[schema]`) ou `[plataforma]`.
 

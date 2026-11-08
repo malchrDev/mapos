@@ -52,7 +52,8 @@ A suíte unitária completa no Windows tem 14 falhas e 4 erros pré-existentes
    painel, minha conta, planos e vencimento, backup, cancelar e excluir
    empresa. Fica para a Fase 5: cobrança (gateway a escolher) e bloqueio
    automático por vencimento e por limite do plano.
-5. PR da branch.
+5. PR da branch: https://github.com/malchrDev/mapos/pull/1 (rascunho).
+6. Produção: `docs/producao-vps.md` (VPS Hostinger com o ZAPScout, `gestordauel.com.br`). Falta aplicar na VPS.
 
 ## Backup: o que falta (combinado em 2026-11-07, fazer no fim da lista)
 

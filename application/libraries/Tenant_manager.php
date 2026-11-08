@@ -224,6 +224,7 @@ class Tenant_manager
         }
 
         $this->mestre()->where('id', $registro['id'])->update('tenant_dominios', ['verificado_em' => date('Y-m-d H:i:s')]);
+        $this->atualizarRotasTraefik();
 
         return true;
     }
@@ -237,6 +238,39 @@ class Tenant_manager
         if (in_array($dominio, $reservados, true)) {
             throw new InvalidArgumentException("O domínio {$dominio} é reservado da plataforma.");
         }
+
+        $base = self::dominioBase();
+        if ($base === '' || ! str_ends_with($dominio, '.' . $base)) {
+            return;
+        }
+
+        $nome = substr($dominio, 0, -strlen('.' . $base));
+        if (str_contains($nome, '.')) {
+            throw new InvalidArgumentException("Use um nome só antes de .{$base} (sem pontos): {$dominio}.");
+        }
+        if (in_array($nome, self::subdominiosReservados(), true)) {
+            throw new InvalidArgumentException("O endereço {$dominio} é reservado (usado pela plataforma ou por outro sistema no mesmo domínio).");
+        }
+    }
+
+    /** Nomes que nunca viram endereço de empresa, além dos de SAAS_SUBDOMINIOS_RESERVADOS. */
+    public const SUBDOMINIOS_RESERVADOS = [
+        'www', 'app', 'api', 'painel', 'admin', 'mail', 'smtp', 'imap', 'pop', 'webmail', 'ftp',
+        'ns1', 'ns2', 'mx', 'status', 'cdn', 'static', 'assets', 'docs', 'blog', 'suporte', 'ajuda',
+        'traefik', 'evolution', 'teste', 'staging', 'dev',
+    ];
+
+    /**
+     * Subdomínios reservados: a lista fixa e os do .env (SAAS_SUBDOMINIOS_RESERVADOS,
+     * separados por vírgula), para os nomes de outros sistemas no mesmo domínio.
+     *
+     * @return list<string>
+     */
+    public static function subdominiosReservados(): array
+    {
+        $extras = array_map(static fn ($n) => strtolower(trim($n)), explode(',', (string) ($_ENV['SAAS_SUBDOMINIOS_RESERVADOS'] ?? '')));
+
+        return array_values(array_unique(array_merge(self::SUBDOMINIOS_RESERVADOS, array_filter($extras))));
     }
 
     /**
@@ -244,6 +278,10 @@ class Tenant_manager
      */
     public function listar(): array
     {
+        if (! $this->mestre()->table_exists('tenants')) {
+            throw new RuntimeException('O banco mestre ainda não tem as tabelas: rode php index.php tools tenant_mestre.');
+        }
+
         return $this->mestre()->order_by('id')->get('tenants')->result_array();
     }
 
@@ -589,6 +627,8 @@ class Tenant_manager
             throw $e;
         }
 
+        $this->atualizarRotasTraefik();
+
         return ['id' => $id, 'schema' => $schema, 'admin_email' => $email, 'admin_senha' => $senha];
     }
 
@@ -829,6 +869,91 @@ class Tenant_manager
         return ['usuarios' => $usuarios, 'os_mes' => $osMes, 'armazenamento_mb' => round($bytes / 1048576, 1)];
     }
 
+    /**
+     * Arquivo de rotas do Traefik (provider "file"), quando o Map-OS fica atrás
+     * de um Traefik que atende outros sistemas na mesma VPS: uma rota por
+     * endereço, com certificado próprio emitido pelo resolvedor do Traefik
+     * (desafio HTTP). Entram o painel e todo domínio verificado de qualquer
+     * empresa; domínio próprio só depois de verificado. Empresa suspensa
+     * continua com rota, para o hook responder 404 com HTTPS.
+     *
+     * Configuração (.env): SAAS_TRAEFIK_ARQUIVO (vazio desliga), e opcionais
+     * SAAS_TRAEFIK_SERVICO_URL, SAAS_TRAEFIK_CERTRESOLVER, SAAS_TRAEFIK_ENTRYPOINT.
+     *
+     * @return string|null caminho gravado, ou null se desligado
+     */
+    public function gerarRotasTraefik(): ?string
+    {
+        $arquivo = trim((string) ($_ENV['SAAS_TRAEFIK_ARQUIVO'] ?? ''));
+        if ($arquivo === '') {
+            return null;
+        }
+
+        $servico = trim((string) ($_ENV['SAAS_TRAEFIK_SERVICO_URL'] ?? '')) ?: 'http://mapos-nginx:80';
+        $resolvedor = trim((string) ($_ENV['SAAS_TRAEFIK_CERTRESOLVER'] ?? '')) ?: 'le';
+        $entrada = trim((string) ($_ENV['SAAS_TRAEFIK_ENTRYPOINT'] ?? '')) ?: 'websecure';
+        if (! preg_match('#^https?://[a-z0-9.-]+(:\d+)?/?$#', $servico) || ! preg_match('/^[a-zA-Z0-9_-]+$/', $resolvedor . $entrada)) {
+            throw new InvalidArgumentException('SAAS_TRAEFIK_SERVICO_URL, SAAS_TRAEFIK_CERTRESOLVER ou SAAS_TRAEFIK_ENTRYPOINT inválido.');
+        }
+
+        $hosts = array_column($this->mestre()->select('dominio')->where('verificado_em IS NOT NULL', null, false)->get('tenant_dominios')->result_array(), 'dominio');
+        $hosts[] = self::hostPainel();
+        $hosts = array_values(array_unique(array_filter(array_map('strtolower', $hosts))));
+        sort($hosts);
+
+        $linhas = ['# Gerado pelo Map-OS (Tenant_manager::gerarRotasTraefik). Não edite: é reescrito a cada empresa ou domínio novo.', 'http:', '  routers:'];
+        foreach ($hosts as $host) {
+            // O host entra numa regra do Traefik: só letras, números, hífen e ponto.
+            if (! preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $host)) {
+                log_message('error', 'gerarRotasTraefik: domínio ignorado por ter caracteres inválidos: ' . $host);
+
+                continue;
+            }
+            $nome = 'mapos-' . substr(preg_replace('/[^a-z0-9]+/', '-', $host), 0, 50) . '-' . substr(md5($host), 0, 6);
+            array_push(
+                $linhas,
+                '    ' . $nome . ':',
+                '      rule: "Host(`' . $host . '`)"',
+                '      entryPoints: ["' . $entrada . '"]',
+                '      service: mapos',
+                '      tls:',
+                '        certResolver: ' . $resolvedor
+            );
+        }
+        if (count($linhas) === 3) {
+            $linhas[2] = '  routers: {}';
+        }
+        array_push($linhas, '  services:', '    mapos:', '      loadBalancer:', '        passHostHeader: true', '        servers:', '          - url: "' . rtrim($servico, '/') . '"', '');
+
+        $pasta = dirname($arquivo);
+        if (! is_dir($pasta) && ! @mkdir($pasta, 0755, true) && ! is_dir($pasta)) {
+            throw new RuntimeException('Pasta das rotas do Traefik não existe: ' . $pasta);
+        }
+        $temporario = $pasta . DIRECTORY_SEPARATOR . '.' . basename($arquivo) . '.' . bin2hex(random_bytes(4));
+        if (file_put_contents($temporario, implode("\n", $linhas)) === false || ! @rename($temporario, $arquivo)) {
+            @unlink($temporario);
+
+            throw new RuntimeException('Não foi possível gravar as rotas do Traefik em ' . $arquivo);
+        }
+        @chmod($arquivo, 0644);
+
+        return $arquivo;
+    }
+
+    /**
+     * gerarRotasTraefik() sem derrubar quem chamou: a empresa já foi criada (ou
+     * o domínio verificado) e a rota pode ser regerada depois por
+     * `tools traefik_rotas`. A falha vai para o log.
+     */
+    protected function atualizarRotasTraefik(): void
+    {
+        try {
+            $this->gerarRotasTraefik();
+        } catch (Throwable $erro) {
+            log_message('error', 'Rotas do Traefik não atualizadas (rode tools traefik_rotas): ' . $erro->getMessage());
+        }
+    }
+
     /** Tarefas agendadas que rodam para cada empresa (`tools tenants_tarefa`). */
     public const TAREFAS_POR_TENANT = ['email/process', 'email/retry'];
 
@@ -1015,6 +1140,29 @@ class Tenant_manager
         return $backups;
     }
 
+    /**
+     * Apaga os backups de uma empresa mais antigos que $dias, mantendo sempre
+     * os $minimo mais novos. Só mexe nos backups do schema informado: o backup
+     * final de uma empresa excluída (schema que não existe mais) nunca passa
+     * por aqui.
+     *
+     * @return int quantos foram apagados
+     */
+    public function podarBackups(string $schema, int $dias, int $minimo = 3): int
+    {
+        $this->validarNomeSchema($schema);
+        $limite = time() - max(1, $dias) * 86400;
+        $apagados = 0;
+
+        foreach (array_slice($this->listarBackups($schema), max(0, $minimo)) as $backup) {
+            if ($backup['criado_em'] < $limite && @unlink($this->pastaBackups() . DIRECTORY_SEPARATOR . $backup['arquivo'])) {
+                $apagados++;
+            }
+        }
+
+        return $apagados;
+    }
+
     /** Nome de arquivo de backup: <schema>-AAAAMMDD-HHMMSS.zip */
     public const PADRAO_BACKUP = '/^(mapos_[a-z0-9_]{1,50})-(\d{8}-\d{6})\.zip$/';
 
@@ -1069,6 +1217,8 @@ class Tenant_manager
             throw new RuntimeException('O schema foi apagado, mas o registro da empresa ficou no mestre: ' . ($mestre->error()['message'] ?? ''));
         }
         $mestre->trans_commit();
+
+        $this->atualizarRotasTraefik();
 
         return ['backup' => $backup['arquivo']];
     }
