@@ -1,5 +1,20 @@
 # Retomada — Fase 1 (multi-tenancy), atualizado em 2026-11-07
 
+## Para retomar (pausa em 2026-11-07, noite)
+
+- Tudo commitado e enviado: PR https://github.com/malchrDev/mapos/pull/1
+  (rascunho, CI verde, último commit 083f400e).
+- Produção **não aplicada**: guia em `docs/producao-vps.md` (VPS Hostinger
+  com o ZAPScout, `gestordauel.com.br`). O passo 4 mexe no Traefik do
+  ZAPScout e precisa de aprovação.
+- Revisão de isolamento concluída (tabela em `docs/multi-tenancy.md`).
+- Próximo, a escolher:
+  1. backup automático externo (S3, testado com MinIO) e restauração pelo painel;
+  2. e-mail de boas-vindas com link para definir a senha;
+  3. Fase 2 (SLA), depois de confirmar a prioridade ITIL/ISO.
+- Ambiente local: `docker compose -f docker/teste/docker-compose.yml start`
+  (painel em http://painel.localhost:8090, e-mails em http://127.0.0.1:8026).
+
 ## Onde paramos
 
 Fundação de multi-tenancy **testada contra MySQL real** e **acessível no
